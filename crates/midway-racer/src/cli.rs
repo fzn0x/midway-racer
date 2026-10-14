@@ -6,17 +6,17 @@ use clap::{Parser, ValueEnum};
 use mw8080bw::Game;
 
 const CONTROLS: &str = "\
-Controls:
-  Left/Right, A/D   Steer
-  Up, W             Accelerate
-  Space, Shift      Shift gear
-  C, 5              Insert coin
-  1, Enter          Start
-  P                 Pause
-  F3                Reset
-  M                 Mute
-  -, =              Volume down, up
-  Esc               Quit";
+Controls:           Keyboard           Gamepad
+  Steer             Left/Right, A/D    Left stick, d-pad
+  Accelerate        Up, W              Right trigger, A
+  Shift gear        Space, Shift       X, or LB/RB for low/high
+  Insert coin       C, 5               Back/Select
+  Start             1, Enter           Start
+  Pause             P
+  Reset             F3
+  Mute              M
+  Volume down, up   -, =
+  Quit              Esc";
 
 /// Play Laguna Racer and 280-ZZZAP on an emulated Midway 8080 board.
 ///

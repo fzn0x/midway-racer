@@ -67,7 +67,7 @@ impl App {
             machine,
             window,
             display,
-            input: Input::default(),
+            input: Input::new(),
             audio,
             clock: FrameClock::new(),
             volume: args.volume,
