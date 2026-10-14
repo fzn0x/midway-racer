@@ -1,0 +1,20 @@
+[package]
+name = "midway-racer"
+description = "Play Laguna Racer and 280-ZZZAP on an emulated Midway 8080 board"
+keywords = ["arcade", "emulator", "midway", "8080", "racing"]
+categories = ["emulators", "games"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+minifb = "0.29"
+mw8080bw.workspace = true
+
+[lints]
+workspace = true

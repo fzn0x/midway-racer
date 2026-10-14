@@ -12,6 +12,7 @@ publish = false
 
 [workspace.dependencies]
 i8080 = { path = "crates/i8080" }
+mw8080bw = { path = "crates/mw8080bw" }
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
