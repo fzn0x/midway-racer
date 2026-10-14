@@ -285,12 +285,23 @@ class App {
     if (!game) {
       return;
     }
+    // Build the new emulator before freeing the running one, which must
+    // keep working if the ROMs turn out to be unusable.
+    let emulator: Emulator;
+    try {
+      emulator = new Emulator(
+        this.#roms.library,
+        shortName,
+        this.#audio?.sampleRate ?? 0,
+      );
+    } catch (error) {
+      this.#loader.setStatus(
+        `${game.title} cannot start: ${error instanceof Error ? error.message : String(error)}`,
+        "error",
+      );
+      return;
+    }
     this.#session?.stop();
-    const emulator = new Emulator(
-      this.#roms.library,
-      shortName,
-      this.#audio?.sampleRate ?? 0,
-    );
     const dipSwitches = this.#settings.dipSwitches[shortName];
     if (dipSwitches !== undefined) {
       emulator.dipSwitches = dipSwitches;
