@@ -73,3 +73,20 @@ jobs:
           toolchain: "1.85"
       - uses: Swatinem/rust-cache@v2
       - run: cargo +1.85 check --workspace --all-targets
+
+  web:
+    name: Web frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-web
+      - run: cargo clippy --package midway-racer-web --target wasm32-unknown-unknown -- --deny warnings
+      - name: Build
+        working-directory: web
+        run: npm run build
+      - name: Type-check, lint and check formatting
+        working-directory: web
+        run: npm run check
+      - name: Test
+        working-directory: web
+        run: npm test
