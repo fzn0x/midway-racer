@@ -7,14 +7,24 @@
 
 mod engine;
 mod filters;
+mod noise;
 
 use engine::Engine;
 use filters::DcBlocker;
+use noise::Effects;
 
 use crate::game::Game;
 
-/// Output of the engine stage in the final mix.
-const ENGINE_LEVEL: f64 = 0.35;
+// Mixing levels, relative to the 12 kΩ resistors R63 (skid) and R65
+// (boom). The engine enters through 33 kΩ R66 but swings about twice as
+// far, and the post-crash screech through 150 kΩ R64.
+const ENGINE_LEVEL: f64 = 0.7;
+const SKID_LEVEL: f64 = 1.0;
+const POST_CRASH_LEVEL: f64 = 0.08;
+const BOOM_LEVEL: f64 = 1.0;
+/// Overall level, chosen like MAME's so that every effect at once just
+/// avoids clipping, as with the cabinet's volume at its midpoint.
+const MASTER_LEVEL: f64 = 0.3;
 
 /// The values last written to the sound board's two latches.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -71,6 +81,7 @@ pub struct SoundBoard {
     sample_rate: u32,
     latches: SoundLatches,
     engine: Engine,
+    effects: Effects,
     /// The coupling capacitors of the output amplifier, C24 with R73.
     output: DcBlocker,
 }
@@ -89,6 +100,7 @@ impl SoundBoard {
             sample_rate,
             latches: SoundLatches::default(),
             engine: Engine::new(game, rate),
+            effects: Effects::new(rate),
             output: DcBlocker::new(rate, 16.0),
         }
     }
@@ -111,8 +123,13 @@ impl SoundBoard {
     /// Fills `out` with mono samples in the range -1 to 1.
     pub fn render(&mut self, out: &mut [f32]) {
         for sample in out {
-            let mix = ENGINE_LEVEL * self.engine.sample(self.latches);
-            *sample = self.output.process(mix).clamp(-1.0, 1.0) as f32;
+            let engine = self.engine.sample(self.latches);
+            let effects = self.effects.sample(self.latches);
+            let mix = ENGINE_LEVEL * engine
+                + SKID_LEVEL * effects.skid
+                + POST_CRASH_LEVEL * effects.post_crash
+                + BOOM_LEVEL * effects.boom;
+            *sample = self.output.process(MASTER_LEVEL * mix).clamp(-1.0, 1.0) as f32;
         }
     }
 }
@@ -146,6 +163,21 @@ mod tests {
         assert!(samples.iter().any(|sample| sample.abs() > 0.01));
         assert_eq!(board.sample_rate(), 44_100);
         assert_eq!(board.latches().pedal(), 15);
+    }
+
+    #[test]
+    fn everything_at_once_stays_within_range() {
+        let mut board = SoundBoard::new(Game::LagunaRacer, 48_000);
+        board.set_latches(SoundLatches {
+            engine: 0x2f,
+            effects: 0x0d,
+        });
+        let mut samples = vec![0.0; 96_000];
+        board.render(&mut samples);
+        let peak = samples
+            .iter()
+            .fold(0.0f32, |peak, sample| peak.max(sample.abs()));
+        assert!(peak > 0.3 && peak < 1.0, "{peak}");
     }
 
     #[test]
