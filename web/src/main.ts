@@ -349,9 +349,12 @@ class App {
   }
 
   async #forget(): Promise<void> {
-    await this.#roms.forget();
+    // The library empties at once; show it before storage catches up, so
+    // no Play button outlives the files.
+    const forgotten = this.#roms.forget();
     this.#loader.setStatus("Forgot the ROM files.");
     this.#loader.render(this.#roms.library);
+    await forgotten;
   }
 
   #reportProblems(problems: readonly string[]): void {

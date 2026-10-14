@@ -11,6 +11,9 @@ const MAX_FILE_SIZE = 4 * 1024 * 1024;
 export class RomCollection {
   readonly #files = new Map<string, StoredFile>();
   #library = new RomLibrary();
+  /** Counts forgets, so files still being read when the player forgot
+   * everything are dropped rather than stored again. */
+  #generation = 0;
 
   /** The files, read by the emulator. */
   get library(): RomLibrary {
@@ -27,7 +30,10 @@ export class RomCollection {
       return [];
     });
     for (const file of stored) {
-      this.#files.set(file.name, file);
+      // Files the player dropped while storage was being read are newer.
+      if (!this.#files.has(file.name)) {
+        this.#files.set(file.name, file);
+      }
     }
     return { count: stored.length, problems: this.#rebuild() };
   }
@@ -35,16 +41,21 @@ export class RomCollection {
   /** Adds files, replacing those with the same names, and stores them.
    * Returns the problems reading them. */
   async add(files: readonly File[]): Promise<string[]> {
+    const generation = this.#generation;
     const tooLarge: string[] = [];
+    const read: StoredFile[] = [];
     for (const file of files) {
       if (file.size > MAX_FILE_SIZE) {
         tooLarge.push(file.name);
-        continue;
+      } else {
+        read.push({ name: file.name, data: await file.arrayBuffer() });
       }
-      this.#files.set(file.name, {
-        name: file.name,
-        data: await file.arrayBuffer(),
-      });
+    }
+    if (generation !== this.#generation) {
+      return ["the files were forgotten while being read"];
+    }
+    for (const file of read) {
+      this.#files.set(file.name, file);
     }
     const problems = this.#rebuild();
     if (tooLarge.length > 0) {
@@ -56,8 +67,10 @@ export class RomCollection {
     return problems;
   }
 
-  /** Forgets every file, here and in storage. */
+  /** Forgets every file, here at once and in storage when the promise
+   * settles. */
   async forget(): Promise<void> {
+    this.#generation++;
     this.#files.clear();
     this.#rebuild();
     await clearFiles().catch((error: unknown) => {
