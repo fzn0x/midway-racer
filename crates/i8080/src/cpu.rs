@@ -121,9 +121,108 @@ impl Cpu {
                 self.registers.set_de(hl);
             }
 
+            // ADD, ADC, SUB, SBB r
+            0x80..=0x9f => {
+                let value = self.register(bus, opcode);
+                self.alu(opcode >> 3, value);
+            }
+            // ADI, ACI, SUI, SBI d8
+            0xc6 | 0xce | 0xd6 | 0xde => {
+                let value = self.fetch_byte(bus);
+                self.alu(opcode >> 3, value);
+            }
+            // INR r
+            0x04 | 0x0c | 0x14 | 0x1c | 0x24 | 0x2c | 0x34 | 0x3c => {
+                let result = self.register(bus, opcode >> 3).wrapping_add(1);
+                let flags = &mut self.registers.flags;
+                flags.aux_carry = result & 0x0f == 0x00;
+                flags.set_zsp(result);
+                self.set_register(bus, opcode >> 3, result);
+            }
+            // DCR r
+            0x05 | 0x0d | 0x15 | 0x1d | 0x25 | 0x2d | 0x35 | 0x3d => {
+                let result = self.register(bus, opcode >> 3).wrapping_sub(1);
+                let flags = &mut self.registers.flags;
+                flags.aux_carry = result & 0x0f != 0x0f;
+                flags.set_zsp(result);
+                self.set_register(bus, opcode >> 3, result);
+            }
+            // INX rp
+            0x03 | 0x13 | 0x23 | 0x33 => {
+                self.set_pair(opcode >> 4, self.pair(opcode >> 4).wrapping_add(1));
+            }
+            // DCX rp
+            0x0b | 0x1b | 0x2b | 0x3b => {
+                self.set_pair(opcode >> 4, self.pair(opcode >> 4).wrapping_sub(1));
+            }
+            // DAD rp
+            0x09 | 0x19 | 0x29 | 0x39 => {
+                let (sum, carry) = self.registers.hl().overflowing_add(self.pair(opcode >> 4));
+                self.registers.set_hl(sum);
+                self.registers.flags.carry = carry;
+            }
+            // DAA
+            0x27 => self.decimal_adjust_accumulator(),
+
             _ => todo!("opcode {opcode:#04x} is not implemented yet"),
         }
         cycles
+    }
+
+    /// Applies the ALU operation encoded in the low three bits of `code` to
+    /// the accumulator and `value`: ADD, ADC, SUB or SBB.
+    fn alu(&mut self, code: u8, value: u8) {
+        let carry = self.registers.flags.carry;
+        match code & 0b111 {
+            0 => self.registers.a = self.add(value, false),
+            1 => self.registers.a = self.add(value, carry),
+            2 => self.registers.a = self.subtract(value, false),
+            3 => self.registers.a = self.subtract(value, carry),
+            _ => todo!("logical operations are not implemented yet"),
+        }
+    }
+
+    /// Adds `value` and a carry to the accumulator, updating every flag, and
+    /// returns the sum.
+    fn add(&mut self, value: u8, carry_in: bool) -> u8 {
+        let (result, aux_carry, carry) = add_with_carries(self.registers.a, value, carry_in);
+        let flags = &mut self.registers.flags;
+        flags.aux_carry = aux_carry;
+        flags.carry = carry;
+        flags.set_zsp(result);
+        result
+    }
+
+    /// Subtracts `value` and a borrow from the accumulator, updating every
+    /// flag, and returns the difference.
+    ///
+    /// The 8080 subtracts by adding the one's complement of the operand
+    /// with an inverted borrow. The carry out is inverted back into a
+    /// borrow, but the auxiliary carry is left exactly as the adder made it.
+    fn subtract(&mut self, value: u8, borrow_in: bool) -> u8 {
+        let (result, aux_carry, carry) = add_with_carries(self.registers.a, !value, !borrow_in);
+        let flags = &mut self.registers.flags;
+        flags.aux_carry = aux_carry;
+        flags.carry = !carry;
+        flags.set_zsp(result);
+        result
+    }
+
+    /// Turns the binary sum of two packed BCD numbers into packed BCD (DAA).
+    fn decimal_adjust_accumulator(&mut self) {
+        let a = self.registers.a;
+        let flags = self.registers.flags;
+        let mut correction = 0;
+        let mut carry = flags.carry;
+        if flags.aux_carry || a & 0x0f > 0x09 {
+            correction |= 0x06;
+        }
+        if flags.carry || a > 0x99 {
+            correction |= 0x60;
+            carry = true;
+        }
+        self.registers.a = self.add(correction, false);
+        self.registers.flags.carry = carry;
     }
 
     fn fetch_byte<B: Bus + ?Sized>(&mut self, bus: &mut B) -> u8 {
@@ -193,6 +292,15 @@ impl Cpu {
     }
 }
 
+/// Adds two bytes and a carry. Returns the sum and the carries out of bit 3
+/// and bit 7.
+fn add_with_carries(a: u8, b: u8, carry_in: bool) -> (u8, bool, bool) {
+    let sum = u16::from(a) + u16::from(b) + u16::from(carry_in);
+    // Bit n of `carries` is set when there was a carry into bit n.
+    let carries = sum ^ u16::from(a) ^ u16::from(b);
+    (sum as u8, carries & 0x010 != 0, carries & 0x100 != 0)
+}
+
 fn read_word<B: Bus + ?Sized>(bus: &mut B, address: u16) -> u16 {
     let low = bus.read(address);
     let high = bus.read(address.wrapping_add(1));
@@ -247,6 +355,20 @@ mod tests {
         }
         cpu.cycles -= u64::from(CYCLES[0x76]);
         bus
+    }
+
+    /// Builds flags from a `"SZAPC"` pattern where `.` marks a clear flag,
+    /// e.g. `"S..P."` for sign and parity.
+    fn flags(pattern: &str) -> crate::Flags {
+        let set: Vec<bool> = pattern.chars().map(|flag| flag != '.').collect();
+        assert_eq!(set.len(), 5, "pattern must have five flags");
+        crate::Flags {
+            sign: set[0],
+            zero: set[1],
+            aux_carry: set[2],
+            parity: set[3],
+            carry: set[4],
+        }
     }
 
     #[test]
@@ -355,6 +477,137 @@ mod tests {
         );
         assert_eq!(cpu.registers.pc, 9);
         assert_eq!(cpu.cycles(), 8 * 4);
+    }
+
+    #[test]
+    fn add_sets_every_flag() {
+        let mut cpu = Cpu::new();
+        // MVI A,6CH ; MVI D,2EH ; ADD D ; HLT  (Intel 8080 manual example)
+        run(&mut cpu, &[0x3e, 0x6c, 0x16, 0x2e, 0x82, 0x76]);
+        assert_eq!(cpu.registers.a, 0x9a);
+        assert_eq!(cpu.registers.flags, flags("S.AP."));
+        assert_eq!(cpu.cycles(), 7 + 7 + 4);
+    }
+
+    #[test]
+    fn adc_adds_the_carry() {
+        let mut cpu = Cpu::new();
+        // MVI A,42H ; MVI C,3DH ; ADC C ; HLT
+        run(&mut cpu, &[0x3e, 0x42, 0x0e, 0x3d, 0x89, 0x76]);
+        assert_eq!(cpu.registers.a, 0x7f);
+        assert_eq!(cpu.registers.flags, flags("....."));
+
+        let mut cpu = Cpu::new();
+        cpu.registers.flags.carry = true;
+        run(&mut cpu, &[0x3e, 0x42, 0x0e, 0x3d, 0x89, 0x76]);
+        assert_eq!(cpu.registers.a, 0x80);
+        assert_eq!(cpu.registers.flags, flags("S.A.."));
+    }
+
+    #[test]
+    fn add_immediate_reports_carry_out_of_bit_7() {
+        let mut cpu = Cpu::new();
+        // MVI A,0F0H ; ADI 20H ; ACI 00H ; HLT
+        run(&mut cpu, &[0x3e, 0xf0, 0xc6, 0x20, 0xce, 0x00, 0x76]);
+        assert_eq!(cpu.registers.a, 0x11);
+        assert_eq!(cpu.registers.flags, flags("...P."));
+        assert_eq!(cpu.cycles(), 7 + 7 + 7);
+    }
+
+    #[test]
+    fn sub_of_itself_clears_the_accumulator() {
+        let mut cpu = Cpu::new();
+        // MVI A,3EH ; SUB A ; HLT  (Intel 8080 manual example)
+        run(&mut cpu, &[0x3e, 0x3e, 0x97, 0x76]);
+        assert_eq!(cpu.registers.a, 0x00);
+        assert_eq!(cpu.registers.flags, flags(".ZAP."));
+    }
+
+    #[test]
+    fn sbb_subtracts_the_borrow() {
+        let mut cpu = Cpu::new();
+        cpu.registers.flags.carry = true;
+        // MVI A,04H ; MVI L,02H ; SBB L ; HLT  (Intel 8080 manual example)
+        run(&mut cpu, &[0x3e, 0x04, 0x2e, 0x02, 0x9d, 0x76]);
+        assert_eq!(cpu.registers.a, 0x01);
+        assert_eq!(cpu.registers.flags, flags("..A.."));
+    }
+
+    #[test]
+    fn subtract_immediate_sets_borrow() {
+        let mut cpu = Cpu::new();
+        // MVI A,01H ; SUI 02H ; SBI 00H ; HLT
+        run(&mut cpu, &[0x3e, 0x01, 0xd6, 0x02, 0xde, 0x00, 0x76]);
+        assert_eq!(cpu.registers.a, 0xfe);
+        assert_eq!(cpu.registers.flags, flags("S.A.."));
+    }
+
+    #[test]
+    fn inr_and_dcr_keep_carry_and_track_aux_carry() {
+        let mut cpu = Cpu::new();
+        cpu.registers.flags.carry = true;
+        // MVI B,0FFH ; INR B ; HLT
+        run(&mut cpu, &[0x06, 0xff, 0x04, 0x76]);
+        assert_eq!(cpu.registers.b, 0x00);
+        assert_eq!(cpu.registers.flags, flags(".ZAPC"));
+
+        let mut cpu = Cpu::new();
+        // LXI H,0100H ; MVI M,40H ; DCR M ; HLT
+        let bus = run(&mut cpu, &[0x21, 0x00, 0x01, 0x36, 0x40, 0x35, 0x76]);
+        assert_eq!(bus.memory[0x0100], 0x3f);
+        assert_eq!(cpu.registers.flags, flags("...P."));
+        assert_eq!(cpu.cycles(), 10 + 10 + 10);
+    }
+
+    #[test]
+    fn inx_and_dcx_wrap_without_touching_flags() {
+        let mut cpu = Cpu::new();
+        // LXI D,0FFFFH ; INX D ; DCX SP ; HLT
+        run(&mut cpu, &[0x11, 0xff, 0xff, 0x13, 0x3b, 0x76]);
+        assert_eq!(cpu.registers.de(), 0x0000);
+        assert_eq!(cpu.registers.sp, 0xffff);
+        assert_eq!(cpu.registers.flags, flags("....."));
+        assert_eq!(cpu.cycles(), 10 + 5 + 5);
+    }
+
+    #[test]
+    fn dad_adds_pairs_and_only_sets_carry() {
+        let mut cpu = Cpu::new();
+        // LXI B,339FH ; LXI H,0A17BH ; DAD B ; HLT  (Intel 8080 manual example)
+        run(&mut cpu, &[0x01, 0x9f, 0x33, 0x21, 0x7b, 0xa1, 0x09, 0x76]);
+        assert_eq!(cpu.registers.hl(), 0xd51a);
+        assert!(!cpu.registers.flags.carry);
+
+        let mut cpu = Cpu::new();
+        // LXI H,8000H ; DAD H ; HLT
+        run(&mut cpu, &[0x21, 0x00, 0x80, 0x29, 0x76]);
+        assert_eq!(cpu.registers.hl(), 0x0000);
+        assert_eq!(cpu.registers.flags, flags("....C"));
+        assert_eq!(cpu.cycles(), 10 + 10);
+    }
+
+    #[test]
+    fn daa_adjusts_both_nibbles() {
+        let mut cpu = Cpu::new();
+        // MVI A,9BH ; DAA ; HLT  (Intel 8080 manual example)
+        run(&mut cpu, &[0x3e, 0x9b, 0x27, 0x76]);
+        assert_eq!(cpu.registers.a, 0x01);
+        assert!(cpu.registers.flags.carry && cpu.registers.flags.aux_carry);
+    }
+
+    #[test]
+    fn daa_completes_bcd_addition() {
+        let mut cpu = Cpu::new();
+        // MVI A,38H ; ADI 45H ; DAA ; HLT  (38 + 45 = 83)
+        run(&mut cpu, &[0x3e, 0x38, 0xc6, 0x45, 0x27, 0x76]);
+        assert_eq!(cpu.registers.a, 0x83);
+        assert!(!cpu.registers.flags.carry);
+
+        let mut cpu = Cpu::new();
+        // MVI A,99H ; ADI 01H ; DAA ; HLT  (99 + 1 = 100)
+        run(&mut cpu, &[0x3e, 0x99, 0xc6, 0x01, 0x27, 0x76]);
+        assert_eq!(cpu.registers.a, 0x00);
+        assert!(cpu.registers.flags.carry && cpu.registers.flags.zero);
     }
 
     #[test]

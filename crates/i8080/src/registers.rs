@@ -56,6 +56,13 @@ impl Flags {
             carry: byte & Self::CARRY != 0,
         }
     }
+
+    /// Updates sign, zero and parity from `result`, as most ALU operations do.
+    pub(crate) const fn set_zsp(&mut self, result: u8) {
+        self.sign = result & 0x80 != 0;
+        self.zero = result == 0;
+        self.parity = result.count_ones() % 2 == 0;
+    }
 }
 
 /// The programmer-visible register file of the 8080.
@@ -143,6 +150,20 @@ mod tests {
             let normalized = (byte & 0b1101_0101) | 0b0000_0010;
             assert_eq!(Flags::from_byte(byte).to_byte(), normalized);
         }
+    }
+
+    #[test]
+    fn set_zsp_computes_sign_zero_and_even_parity() {
+        let mut flags = Flags::default();
+
+        flags.set_zsp(0x00);
+        assert!(flags.zero && flags.parity && !flags.sign);
+
+        flags.set_zsp(0x80);
+        assert!(!flags.zero && !flags.parity && flags.sign);
+
+        flags.set_zsp(0x03);
+        assert!(!flags.zero && flags.parity && !flags.sign);
     }
 
     #[test]
