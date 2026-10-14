@@ -69,32 +69,120 @@ one frame while paused.
 | 280-ZZZAP           | `280zzzap`  | `zzzaph`, `zzzapg`, `zzzapf`, `zzzape`, `zzzapd`, `zzzapc` |
 | 280-ZZZAP (set 2)   | `280zzzapa` | `h`, `g`, `f`                                       |
 
-## Desktop app
+## Run it locally
 
-Install [Rust](https://rustup.rs). On Linux, also install the ALSA, udev
-and xkbcommon/Wayland development packages, for instance
-`sudo apt install libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev`.
+You can run the desktop app, the browser version, or both. Each starts
+from a clone of the repository.
+
+### 1. Install the prerequisites
+
+| Tool                  | Needed for       | How to get it                                                                                     |
+| --------------------- | ---------------- | ------------------------------------------------------------------------------------------------- |
+| Git                   | Both             | <https://git-scm.com>                                                                             |
+| Rust (through rustup) | Both             | <https://rustup.rs>                                                                               |
+| C toolchain           | Both             | Windows: [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/) with "Desktop development with C++". macOS: `xcode-select --install`. Linux: see below. |
+| Node.js 22.12 or newer | Browser version | <https://nodejs.org>                                                                              |
+| `wasm-bindgen` CLI    | Browser version  | Installed in step 4                                                                               |
+
+On Linux, the desktop app also needs the development packages for sound
+(ALSA), gamepads (udev) and the window (xkbcommon, Wayland):
+
+```sh
+# Debian, Ubuntu
+sudo apt install build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
+# Fedora
+sudo dnf install gcc pkgconf-pkg-config alsa-lib-devel systemd-devel libxkbcommon-devel wayland-devel
+```
+
+### 2. Clone the repository and install the Rust toolchain
+
+```sh
+git clone https://github.com/fzn0x/midway-racer.git
+cd midway-racer
+rustup toolchain install
+```
+
+`rustup toolchain install` reads `rust-toolchain.toml` and installs the
+stable compiler with rustfmt, Clippy and the WebAssembly target.
+
+### 3. Add the ROMs
+
+The ROMs are not in the repository. Create a `roms` directory at the root
+of the clone and put your ROM set in it, for instance MAME's
+`lagunar.zip`:
+
+```text
+midway-racer/
+└── roms/
+    └── lagunar.zip
+```
+
+Git ignores `roms/`, so the files can't be committed by accident. Zip
+archives, loose dump files and subdirectories all work; see [ROMs](#roms)
+for the files each game needs.
+
+### 4a. Run the desktop app
+
+```sh
+cargo run --release
+```
+
+The first build takes a minute or two. The app finds the ROMs in `roms/`
+and opens a window: press `C` to insert a coin, then drive. To load ROMs
+from somewhere else, pass their path:
 
 ```sh
 cargo run --release -- path/to/lagunar.zip
 ```
 
-Without a path, the app looks in a `roms` directory. Run with `--help` for
-every option, such as `--scale`, `--square-pixels`, `--dip-switches`,
-`--volume`, `--mute` and `--verify`, which only checks the ROMs.
+Arguments after `--` go to the app. `--verify` only checks the ROMs, and
+`--help` lists every option, such as `--scale`, `--square-pixels`,
+`--dip-switches`, `--volume`, `--mute` and `--no-sound`. The binary itself
+is `target/release/midway-racer` (`midway-racer.exe` on Windows).
 
-## Building the web version
+### 4b. Run the browser version
 
-You need Rust, Node.js 22 and the `wasm-bindgen` CLI at the version locked
-in `Cargo.lock`:
+Install the `wasm-bindgen` command-line tool. Its version must match the
+`wasm-bindgen` crate in `Cargo.lock`, currently 0.2.129:
 
 ```sh
-cargo install wasm-bindgen-cli --version 0.2.129
+cargo install wasm-bindgen-cli --version 0.2.129 --locked
+```
+
+Then install the frontend's dependencies and start the development
+server, which also builds the WebAssembly module:
+
+```sh
 cd web
 npm ci
-npm run dev      # builds the WebAssembly module and serves the page
-npm run build    # production build in web/dist
+npm run dev
 ```
+
+Open <http://localhost:5173>, drop your ROM zip on the page or choose it
+with **Choose files**, and press **Play**. The page remembers the ROMs, so
+the next visit goes straight to the game. Browsers only play sound after
+you click or press a key on the page.
+
+To try the optimised build that GitHub Pages serves:
+
+```sh
+npm run build     # writes web/dist
+npm run preview   # serves it on http://localhost:4173
+```
+
+### Troubleshooting
+
+- **"roms does not exist" or "hold none of the supported games"**: the app
+  could not find a complete ROM set. Check that `roms/` is at the root of
+  the clone, or pass the path to your ROMs, and compare your files with
+  the [ROM table](#roms). `--verify` shows what was found for each chip.
+- **wasm-bindgen reports a schema or version mismatch**: the CLI does not
+  match the locked crate. Reinstall it at the version in `Cargo.lock`,
+  adding `--force`.
+- **`linker 'link.exe' not found` on Windows**: install the Visual Studio
+  Build Tools with "Desktop development with C++".
+- **No sound in the browser**: click anywhere on the page or press a key;
+  the panel shows a hint until sound is allowed.
 
 ## Project layout
 
