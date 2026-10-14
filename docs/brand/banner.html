@@ -1,0 +1,99 @@
+<!doctype html>
+<!--
+  Source of docs/images/banner.png, the README banner. To update it, open
+  this page in a browser and capture the #banner element (1280 by 320
+  pixels), for instance with your browser's "Capture node screenshot"
+  developer tool.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Midway Racer banner</title>
+<style>
+  html, body { margin: 0; background: transparent; }
+  .banner {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 44px;
+    width: 1280px;
+    height: 320px;
+    box-sizing: border-box;
+    padding: 0 72px;
+    overflow: hidden;
+    border-radius: 28px;
+    background:
+      radial-gradient(ellipse 60% 120% at 88% 50%, rgb(255 181 71 / 0.10), transparent 70%),
+      #0d0f12;
+    color: #ece9e2;
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  /* The road, drawn the way the game draws it: markers in perspective. */
+  .road {
+    position: absolute;
+    right: 40px;
+    top: 0;
+    bottom: 0;
+    width: 210px;
+  }
+  .road span {
+    position: absolute;
+    height: 7px;
+    background: #ece9e2;
+    border-radius: 1px;
+  }
+  .wheel { flex: none; width: 168px; height: 168px; }
+  .title {
+    margin: 0;
+    color: #ffb547;
+    font-size: 68px;
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+  .tagline {
+    margin: 18px 0 0;
+    color: #8f98a6;
+    font-size: 24px;
+    letter-spacing: 0.02em;
+  }
+  .tagline strong { color: #ece9e2; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="banner" id="banner">
+    <svg class="wheel" viewBox="0 0 64 64" aria-hidden="true">
+      <g fill="none" stroke="#ffb547" stroke-width="6" stroke-linecap="round">
+        <circle cx="32" cy="32" r="26"/>
+        <path d="M8 30h17m14 0h17M32 37v19"/>
+      </g>
+      <circle cx="32" cy="32" r="6.5" fill="#ffb547"/>
+    </svg>
+    <div>
+      <h1 class="title">Midway Racer</h1>
+      <p class="tagline"><strong>Laguna Racer</strong> and <strong>280-ZZZAP</strong> on a cycle-accurate Intel 8080</p>
+    </div>
+    <div class="road" id="road"></div>
+  </div>
+  <script>
+    // Two rows of roadside markers converging towards the horizon.
+    const road = document.getElementById("road");
+    const rows = 7;
+    for (let row = 0; row < rows; row++) {
+      const depth = row / (rows - 1);
+      const y = 28 + depth * 250;
+      const spread = 16 + depth * 78;
+      const width = 8 + depth * 22;
+      for (const side of [-1, 1]) {
+        const marker = document.createElement("span");
+        marker.style.top = `${y}px`;
+        marker.style.width = `${width}px`;
+        marker.style.left = `${105 + side * spread - width / 2}px`;
+        marker.style.opacity = String(0.25 + depth * 0.55);
+        road.append(marker);
+      }
+    }
+  </script>
+</body>
+</html>
