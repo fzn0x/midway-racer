@@ -2,6 +2,7 @@ import "./styles.css";
 
 import { AudioOutput } from "./audio";
 import { Controls } from "./controls";
+import { CpuView } from "./debugger";
 import { closeOnBackdropClick, openDialog, SettingsDialog } from "./dialogs";
 import { byId } from "./dom";
 import { type GameInfo, loadGames } from "./games";
@@ -28,6 +29,7 @@ class App {
   readonly #panel: Panel;
   readonly #keyboard: Keyboard;
   readonly #controls: Controls;
+  readonly #cpuView = new CpuView(() => this.#session?.stepFrame());
   readonly #settingsDialog: SettingsDialog;
   readonly #helpDialog = byId("help-dialog", HTMLDialogElement);
   readonly #gameSection = byId("game");
@@ -131,6 +133,10 @@ class App {
       this.#openDialog(this.#helpDialog);
       return;
     }
+    if (command === "debugger") {
+      this.#cpuView.toggle();
+      return;
+    }
     const session = this.#session;
     if (!session) {
       return;
@@ -147,6 +153,9 @@ class App {
         break;
       case "shift":
         session.shift();
+        break;
+      case "step":
+        session.stepFrame();
         break;
       case "mute":
         this.#setSound({ muted: !this.#settings.muted });
@@ -250,6 +259,7 @@ class App {
       this.#screen,
       this.#controls,
       this.#panel,
+      this.#cpuView,
       this.#audio,
     );
     this.#gameSection.dataset.orientation = emulator.vertical

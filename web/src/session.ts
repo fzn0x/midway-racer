@@ -2,6 +2,7 @@
 
 import { AUDIO_LEAD_SECONDS, type AudioOutput } from "./audio";
 import type { Controls } from "./controls";
+import type { CpuView } from "./debugger";
 import type { PadCommand } from "./gamepad";
 import { audioFramesDue, FrameClock } from "./pacing";
 import type { Panel } from "./panel";
@@ -18,6 +19,7 @@ export class Session {
   readonly #renderer: Renderer;
   readonly #controls: Controls;
   readonly #panel: Panel;
+  readonly #cpuView: CpuView;
   readonly #audio: AudioOutput | undefined;
   readonly #input = new InputState();
   /** The board's refresh rate; read once the WebAssembly module is ready. */
@@ -35,6 +37,7 @@ export class Session {
     canvas: HTMLCanvasElement,
     controls: Controls,
     panel: Panel,
+    cpuView: CpuView,
     audio: AudioOutput | undefined,
   ) {
     this.emulator = emulator;
@@ -46,6 +49,7 @@ export class Session {
     );
     this.#controls = controls;
     this.#panel = panel;
+    this.#cpuView = cpuView;
     this.#audio = audio;
   }
 
@@ -72,6 +76,18 @@ export class Session {
     this.#paused = paused;
     this.#clock.restart(performance.now());
     this.#showPanel();
+    this.#cpuView.show(this.emulator, false);
+  }
+
+  /** Runs a single frame while paused, for the debugger. */
+  stepFrame(): void {
+    if (!this.#paused) {
+      return;
+    }
+    this.#runFrame();
+    this.#renderer.draw(this.#memory, this.emulator.drawPicture());
+    this.#showPanel();
+    this.#cpuView.show(this.emulator, false);
   }
 
   insertCoin(): void {
@@ -124,16 +140,21 @@ export class Session {
       : this.#clock.framesDue(now);
 
     for (let frame = 0; frame < frames; frame++) {
-      this.#controls.apply(this.#input);
-      this.#input.highGear = this.#highGear;
-      this.emulator.runFrame(this.#input);
+      this.#runFrame();
       audio?.play(this.emulator.audio());
     }
     if (frames > 0) {
       this.#renderer.draw(this.#memory, this.emulator.drawPicture());
       this.#showPanel();
+      this.#cpuView.show(this.emulator, true);
     }
   };
+
+  #runFrame(): void {
+    this.#controls.apply(this.#input);
+    this.#input.highGear = this.#highGear;
+    this.emulator.runFrame(this.#input);
+  }
 
   #padCommand(command: PadCommand): void {
     switch (command) {

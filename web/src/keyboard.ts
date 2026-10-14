@@ -9,7 +9,9 @@ export type Command =
   | "mute"
   | "volume-down"
   | "volume-up"
-  | "help";
+  | "help"
+  | "debugger"
+  | "step";
 
 export const STEER_LEFT = ["ArrowLeft", "KeyA"] as const;
 export const STEER_RIGHT = ["ArrowRight", "KeyD"] as const;
@@ -32,6 +34,8 @@ const COMMANDS: Readonly<Partial<Record<string, Command>>> = {
   NumpadAdd: "volume-up",
   KeyH: "help",
   F1: "help",
+  Backquote: "debugger",
+  KeyN: "step",
 };
 
 /** Keys the game owns, whose default actions such as scrolling are blocked. */

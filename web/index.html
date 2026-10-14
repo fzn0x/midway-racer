@@ -193,6 +193,20 @@
             </div>
             <p class="sound__hint" id="sound-hint" role="status" hidden></p>
           </div>
+
+          <details class="debugger" id="debugger">
+            <summary title="Toggle with `">CPU</summary>
+            <pre class="debugger__registers" id="cpu-registers"></pre>
+            <ol class="debugger__listing" id="cpu-disassembly"></ol>
+            <button
+              type="button"
+              class="button button--small"
+              id="step-frame"
+              title="Run one frame while paused (N)"
+            >
+              Step frame
+            </button>
+          </details>
         </aside>
       </section>
 
@@ -294,6 +308,14 @@
               <th scope="row">Sound</th>
               <td>
                 <kbd>M</kbd> mutes, <kbd>-</kbd> <kbd>=</kbd> change volume
+              </td>
+              <td></td>
+            </tr>
+            <tr>
+              <th scope="row">Debugger</th>
+              <td>
+                <kbd>`</kbd> shows the CPU, <kbd>N</kbd> runs one frame while
+                paused
               </td>
               <td></td>
             </tr>

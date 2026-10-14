@@ -654,6 +654,38 @@ code {
   white-space: nowrap;
 }
 
+/* The CPU debugger. */
+
+.debugger summary {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.debugger[open] {
+  display: grid;
+  gap: 10px;
+}
+
+.debugger__registers,
+.debugger__listing {
+  margin: 0;
+  font: 0.75rem/1.5 var(--font-mono);
+}
+
+.debugger__listing {
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+}
+
+.debugger__listing li:first-child {
+  color: var(--accent);
+}
+
 /* Dialogs: help and settings. */
 
 .dialog {
