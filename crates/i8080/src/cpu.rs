@@ -1,4 +1,4 @@
-use crate::timing::CYCLES;
+use crate::timing::{BRANCH_TAKEN_PENALTY, CYCLES};
 use crate::{Bus, Registers};
 
 /// Clock cycles that elapse for each [`Cpu::step`] while the CPU is halted.
@@ -66,8 +66,12 @@ impl Cpu {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one flat match over the opcode space reads like the datasheet"
+    )]
     fn execute<B: Bus + ?Sized>(&mut self, bus: &mut B, opcode: u8) -> u32 {
-        let cycles = u32::from(CYCLES[usize::from(opcode)]);
+        let mut cycles = u32::from(CYCLES[usize::from(opcode)]);
         match opcode {
             // NOP, and its undocumented aliases.
             0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 => {}
@@ -195,6 +199,44 @@ impl Cpu {
             // CMC
             0x3f => self.registers.flags.carry = !self.registers.flags.carry,
 
+            // JMP a16, and its undocumented alias.
+            0xc3 | 0xcb => self.registers.pc = self.fetch_word(bus),
+            // Jcc a16
+            0xc2 | 0xca | 0xd2 | 0xda | 0xe2 | 0xea | 0xf2 | 0xfa => {
+                let address = self.fetch_word(bus);
+                if self.condition(opcode >> 3) {
+                    self.registers.pc = address;
+                }
+            }
+            // CALL a16, and its undocumented aliases.
+            0xcd | 0xdd | 0xed | 0xfd => {
+                let address = self.fetch_word(bus);
+                self.call(bus, address);
+            }
+            // Ccc a16
+            0xc4 | 0xcc | 0xd4 | 0xdc | 0xe4 | 0xec | 0xf4 | 0xfc => {
+                let address = self.fetch_word(bus);
+                if self.condition(opcode >> 3) {
+                    self.call(bus, address);
+                    cycles += BRANCH_TAKEN_PENALTY;
+                }
+            }
+            // RET, and its undocumented alias.
+            0xc9 | 0xd9 => self.registers.pc = self.pop(bus),
+            // Rcc
+            0xc0 | 0xc8 | 0xd0 | 0xd8 | 0xe0 | 0xe8 | 0xf0 | 0xf8 => {
+                if self.condition(opcode >> 3) {
+                    self.registers.pc = self.pop(bus);
+                    cycles += BRANCH_TAKEN_PENALTY;
+                }
+            }
+            // RST n
+            0xc7 | 0xcf | 0xd7 | 0xdf | 0xe7 | 0xef | 0xf7 | 0xff => {
+                self.call(bus, u16::from(opcode & 0x38));
+            }
+            // PCHL
+            0xe9 => self.registers.pc = self.registers.hl(),
+
             _ => todo!("opcode {opcode:#04x} is not implemented yet"),
         }
         cycles
@@ -272,6 +314,42 @@ impl Cpu {
         }
         self.registers.a = self.add(correction, false);
         self.registers.flags.carry = carry;
+    }
+
+    /// Evaluates the condition encoded in the low three bits of `code`:
+    /// NZ, Z, NC, C, PO, PE, P or M.
+    const fn condition(&self, code: u8) -> bool {
+        let flags = self.registers.flags;
+        match code & 0b111 {
+            0 => !flags.zero,
+            1 => flags.zero,
+            2 => !flags.carry,
+            3 => flags.carry,
+            4 => !flags.parity,
+            5 => flags.parity,
+            6 => !flags.sign,
+            _ => flags.sign,
+        }
+    }
+
+    fn call<B: Bus + ?Sized>(&mut self, bus: &mut B, address: u16) {
+        self.push(bus, self.registers.pc);
+        self.registers.pc = address;
+    }
+
+    /// Pushes `value` the way the hardware does: high byte first.
+    fn push<B: Bus + ?Sized>(&mut self, bus: &mut B, value: u16) {
+        let [low, high] = value.to_le_bytes();
+        self.registers.sp = self.registers.sp.wrapping_sub(1);
+        bus.write(self.registers.sp, high);
+        self.registers.sp = self.registers.sp.wrapping_sub(1);
+        bus.write(self.registers.sp, low);
+    }
+
+    fn pop<B: Bus + ?Sized>(&mut self, bus: &mut B) -> u16 {
+        let value = read_word(bus, self.registers.sp);
+        self.registers.sp = self.registers.sp.wrapping_add(2);
+        value
     }
 
     fn fetch_byte<B: Bus + ?Sized>(&mut self, bus: &mut B) -> u8 {
@@ -752,6 +830,136 @@ mod tests {
         // CMC ; CMC ; CMC ; HLT
         run(&mut cpu, &[0x3f, 0x3f, 0x3f, 0x76]);
         assert_eq!(cpu.registers.flags, flags("....C"));
+    }
+
+    #[test]
+    fn jmp_transfers_control() {
+        let mut cpu = Cpu::new();
+        let program = [
+            0xc3, 0x05, 0x00, // 0000: JMP 0005H
+            0x76, 0x76, // 0003: HLT ; HLT
+            0xcb, 0x09, 0x00, // 0005: JMP 0009H (undocumented alias)
+            0x76, // 0008: HLT
+            0x3e, 0x01, // 0009: MVI A,01H
+            0x76, // 000B: HLT
+        ];
+        run(&mut cpu, &program);
+        assert_eq!(cpu.registers.a, 0x01);
+        assert_eq!(cpu.registers.pc, 0x000c);
+        assert_eq!(cpu.cycles(), 10 + 10 + 7);
+    }
+
+    #[test]
+    fn every_condition_tests_its_flag() {
+        // (opcode of Jcc, flags making the condition true)
+        let cases = [
+            (0xc2, "....."), // JNZ
+            (0xca, ".Z..."), // JZ
+            (0xd2, "....."), // JNC
+            (0xda, "....C"), // JC
+            (0xe2, "....."), // JPO
+            (0xea, "...P."), // JPE
+            (0xf2, "....."), // JP
+            (0xfa, "S...."), // JM
+        ];
+        for (opcode, true_flags) in cases {
+            let condition_flags = flags(true_flags);
+            let inverse = crate::Flags::from_byte(!condition_flags.to_byte());
+            for (flags, taken) in [(condition_flags, true), (inverse, false)] {
+                let mut cpu = Cpu::new();
+                cpu.registers.flags = flags;
+                // Jcc 0004H ; HLT ; HLT
+                run(&mut cpu, &[opcode, 0x04, 0x00, 0x76, 0x76]);
+                let expected_pc = if taken { 0x0005 } else { 0x0004 };
+                assert_eq!(cpu.registers.pc, expected_pc, "opcode {opcode:#04x}");
+                assert_eq!(cpu.cycles(), 10, "opcode {opcode:#04x}");
+            }
+        }
+    }
+
+    #[test]
+    fn call_and_ret_use_the_stack() {
+        let mut cpu = Cpu::new();
+        let program = [
+            0x31, 0x00, 0x01, // 0000: LXI SP,0100H
+            0xcd, 0x08, 0x00, // 0003: CALL 0008H
+            0x76, 0x00, // 0006: HLT
+            0x3e, 0x77, // 0008: MVI A,77H
+            0xc9, // 000A: RET
+        ];
+        let bus = run(&mut cpu, &program);
+        assert_eq!(cpu.registers.a, 0x77);
+        assert_eq!(cpu.registers.sp, 0x0100);
+        assert_eq!(bus.memory[0x00fe..0x0100], [0x06, 0x00], "return address");
+        assert_eq!(cpu.cycles(), 10 + 17 + 7 + 10);
+    }
+
+    #[test]
+    fn undocumented_call_and_ret_aliases_work() {
+        for call in [0xdd, 0xed, 0xfd] {
+            let mut cpu = Cpu::new();
+            // LXI SP,0100H ; CALL 0008H ; HLT ; NOP ; RET (undocumented)
+            let program = [0x31, 0x00, 0x01, call, 0x08, 0x00, 0x76, 0x00, 0xd9];
+            run(&mut cpu, &program);
+            assert_eq!(cpu.registers.pc, 0x0007, "opcode {call:#04x}");
+            assert_eq!(cpu.cycles(), 10 + 17 + 10);
+        }
+    }
+
+    #[test]
+    fn conditional_call_and_return_cost_more_when_taken() {
+        let program = [
+            0x31, 0x00, 0x01, // 0000: LXI SP,0100H
+            0xcc, 0x08, 0x00, // 0003: CZ 0008H
+            0x76, 0x00, // 0006: HLT
+            0xc8, // 0008: RZ
+            0x76, // 0009: HLT
+        ];
+
+        let mut cpu = Cpu::new();
+        cpu.registers.flags.zero = true;
+        run(&mut cpu, &program);
+        assert_eq!(cpu.registers.pc, 0x0007);
+        assert_eq!(cpu.cycles(), 10 + 17 + 11);
+
+        let mut cpu = Cpu::new();
+        run(&mut cpu, &program);
+        assert_eq!(cpu.registers.pc, 0x0007);
+        assert_eq!(cpu.cycles(), 10 + 11);
+
+        let mut cpu = Cpu::new();
+        cpu.registers.flags.zero = true;
+        let program = [
+            0x31, 0x00, 0x01, // 0000: LXI SP,0100H
+            0xcd, 0x08, 0x00, // 0003: CALL 0008H
+            0x76, 0x00, // 0006: HLT
+            0xc0, // 0008: RNZ (not taken)
+            0x76, // 0009: HLT
+        ];
+        run(&mut cpu, &program);
+        assert_eq!(cpu.registers.pc, 0x000a);
+        assert_eq!(cpu.cycles(), 10 + 17 + 5);
+    }
+
+    #[test]
+    fn rst_calls_a_fixed_vector() {
+        let mut cpu = Cpu::new();
+        let mut program = vec![0x31, 0x00, 0x01, 0xef, 0x76]; // LXI SP,0100H ; RST 5 ; HLT
+        program.resize(0x28, 0x00);
+        program.extend([0x3e, 0x55, 0xc9]); // 0028: MVI A,55H ; RET
+        run(&mut cpu, &program);
+        assert_eq!(cpu.registers.a, 0x55);
+        assert_eq!(cpu.registers.pc, 0x0005);
+        assert_eq!(cpu.cycles(), 10 + 11 + 7 + 10);
+    }
+
+    #[test]
+    fn pchl_jumps_to_hl() {
+        let mut cpu = Cpu::new();
+        // LXI H,0005H ; PCHL ; HLT ; HLT
+        run(&mut cpu, &[0x21, 0x05, 0x00, 0xe9, 0x76, 0x76]);
+        assert_eq!(cpu.registers.pc, 0x0006);
+        assert_eq!(cpu.cycles(), 10 + 5);
     }
 
     #[test]
