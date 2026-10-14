@@ -120,6 +120,14 @@ cargo test --release -p i8080 --test cpm -- --ignored
 cd web && npm test
 ```
 
+If you own the ROMs, a smoke test boots each game, plays its attract mode,
+inserts a coin and drives for half a minute, failing if the watchdog ever
+resets the board or the game stays dark or silent:
+
+```sh
+MIDWAY_RACER_ROMS=path/to/roms cargo test --release -p mw8080bw --test real_roms -- --ignored --nocapture
+```
+
 CI runs the test suite on Linux, Windows and macOS, and the CPU
 diagnostics, rustfmt, Clippy's pedantic lints, rustdoc, a build with the
 minimum supported Rust version (1.85), ESLint, Prettier and TypeScript's
