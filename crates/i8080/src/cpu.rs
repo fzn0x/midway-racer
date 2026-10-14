@@ -121,13 +121,13 @@ impl Cpu {
                 self.registers.set_de(hl);
             }
 
-            // ADD, ADC, SUB, SBB r
-            0x80..=0x9f => {
+            // ADD, ADC, SUB, SBB, ANA, XRA, ORA, CMP r
+            0x80..=0xbf => {
                 let value = self.register(bus, opcode);
                 self.alu(opcode >> 3, value);
             }
-            // ADI, ACI, SUI, SBI d8
-            0xc6 | 0xce | 0xd6 | 0xde => {
+            // ADI, ACI, SUI, SBI, ANI, XRI, ORI, CPI d8
+            0xc6 | 0xce | 0xd6 | 0xde | 0xe6 | 0xee | 0xf6 | 0xfe => {
                 let value = self.fetch_byte(bus);
                 self.alu(opcode >> 3, value);
             }
@@ -164,22 +164,71 @@ impl Cpu {
             // DAA
             0x27 => self.decimal_adjust_accumulator(),
 
+            // RLC
+            0x07 => {
+                let a = self.registers.a;
+                self.registers.a = a.rotate_left(1);
+                self.registers.flags.carry = a & 0x80 != 0;
+            }
+            // RRC
+            0x0f => {
+                let a = self.registers.a;
+                self.registers.a = a.rotate_right(1);
+                self.registers.flags.carry = a & 0x01 != 0;
+            }
+            // RAL
+            0x17 => {
+                let a = self.registers.a;
+                self.registers.a = a << 1 | u8::from(self.registers.flags.carry);
+                self.registers.flags.carry = a & 0x80 != 0;
+            }
+            // RAR
+            0x1f => {
+                let a = self.registers.a;
+                self.registers.a = a >> 1 | u8::from(self.registers.flags.carry) << 7;
+                self.registers.flags.carry = a & 0x01 != 0;
+            }
+            // CMA
+            0x2f => self.registers.a = !self.registers.a,
+            // STC
+            0x37 => self.registers.flags.carry = true,
+            // CMC
+            0x3f => self.registers.flags.carry = !self.registers.flags.carry,
+
             _ => todo!("opcode {opcode:#04x} is not implemented yet"),
         }
         cycles
     }
 
     /// Applies the ALU operation encoded in the low three bits of `code` to
-    /// the accumulator and `value`: ADD, ADC, SUB or SBB.
+    /// the accumulator and `value`: ADD, ADC, SUB, SBB, ANA, XRA, ORA or CMP.
     fn alu(&mut self, code: u8, value: u8) {
+        let a = self.registers.a;
         let carry = self.registers.flags.carry;
         match code & 0b111 {
             0 => self.registers.a = self.add(value, false),
             1 => self.registers.a = self.add(value, carry),
             2 => self.registers.a = self.subtract(value, false),
             3 => self.registers.a = self.subtract(value, carry),
-            _ => todo!("logical operations are not implemented yet"),
+            // The 8080 sets the auxiliary carry of AND to the OR of both
+            // operands' bit 3 (the 8085 would always set it).
+            4 => self.registers.a = self.logical(a & value, (a | value) & 0x08 != 0),
+            5 => self.registers.a = self.logical(a ^ value, false),
+            6 => self.registers.a = self.logical(a | value, false),
+            _ => {
+                self.subtract(value, false);
+            }
         }
+    }
+
+    /// Sets the flags for the `result` of a logical operation, which always
+    /// clears the carry, and returns it.
+    const fn logical(&mut self, result: u8, aux_carry: bool) -> u8 {
+        let flags = &mut self.registers.flags;
+        flags.aux_carry = aux_carry;
+        flags.carry = false;
+        flags.set_zsp(result);
+        result
     }
 
     /// Adds `value` and a carry to the accumulator, updating every flag, and
@@ -608,6 +657,101 @@ mod tests {
         run(&mut cpu, &[0x3e, 0x99, 0xc6, 0x01, 0x27, 0x76]);
         assert_eq!(cpu.registers.a, 0x00);
         assert!(cpu.registers.flags.carry && cpu.registers.flags.zero);
+    }
+
+    #[test]
+    fn ana_clears_carry_and_ors_bit_3_into_aux_carry() {
+        let mut cpu = Cpu::new();
+        cpu.registers.flags.carry = true;
+        // MVI A,0FCH ; MVI C,0FH ; ANA C ; HLT  (Intel 8080 manual example)
+        run(&mut cpu, &[0x3e, 0xfc, 0x0e, 0x0f, 0xa1, 0x76]);
+        assert_eq!(cpu.registers.a, 0x0c);
+        assert_eq!(cpu.registers.flags, flags("..AP."));
+
+        let mut cpu = Cpu::new();
+        // MVI A,0F0H ; ANI 70H ; HLT
+        run(&mut cpu, &[0x3e, 0xf0, 0xe6, 0x70, 0x76]);
+        assert_eq!(cpu.registers.a, 0x70);
+        assert_eq!(cpu.registers.flags, flags("....."));
+    }
+
+    #[test]
+    fn xra_and_ora_clear_both_carries() {
+        let mut cpu = Cpu::new();
+        cpu.registers.flags = flags("S.A.C");
+        // MVI A,5AH ; XRA A ; HLT
+        run(&mut cpu, &[0x3e, 0x5a, 0xaf, 0x76]);
+        assert_eq!(cpu.registers.a, 0x00);
+        assert_eq!(cpu.registers.flags, flags(".Z.P."));
+
+        let mut cpu = Cpu::new();
+        cpu.registers.flags = flags("..A.C");
+        // MVI A,33H ; ORI 0FH ; HLT
+        run(&mut cpu, &[0x3e, 0x33, 0xf6, 0x0f, 0x76]);
+        assert_eq!(cpu.registers.a, 0x3f);
+        assert_eq!(cpu.registers.flags, flags("...P."));
+
+        let mut cpu = Cpu::new();
+        // MVI A,0FFH ; MVI B,0F0H ; XRI 0FH ; ORA B ; HLT
+        run(&mut cpu, &[0x3e, 0xff, 0x06, 0xf0, 0xee, 0x0f, 0xb0, 0x76]);
+        assert_eq!(cpu.registers.a, 0xf0);
+    }
+
+    #[test]
+    fn cmp_compares_without_storing() {
+        let mut cpu = Cpu::new();
+        // MVI A,0AH ; MVI E,05H ; CMP E ; HLT  (Intel 8080 manual example)
+        run(&mut cpu, &[0x3e, 0x0a, 0x1e, 0x05, 0xbb, 0x76]);
+        assert_eq!(cpu.registers.a, 0x0a);
+        assert!(!cpu.registers.flags.carry && !cpu.registers.flags.zero);
+
+        let mut cpu = Cpu::new();
+        // MVI A,02H ; CPI 05H ; HLT
+        run(&mut cpu, &[0x3e, 0x02, 0xfe, 0x05, 0x76]);
+        assert_eq!(cpu.registers.a, 0x02);
+        assert!(cpu.registers.flags.carry && !cpu.registers.flags.zero);
+
+        let mut cpu = Cpu::new();
+        // MVI A,42H ; CPI 42H ; HLT
+        run(&mut cpu, &[0x3e, 0x42, 0xfe, 0x42, 0x76]);
+        assert!(!cpu.registers.flags.carry && cpu.registers.flags.zero);
+    }
+
+    #[test]
+    fn rotates_move_bits_through_or_around_the_carry() {
+        // (opcode, accumulator, carry in, expected accumulator, carry out),
+        // from the Intel 8080 manual examples.
+        let cases = [
+            (0x07, 0xf2, false, 0xe5, true),  // RLC
+            (0x0f, 0xf2, false, 0x79, false), // RRC
+            (0x17, 0xb5, false, 0x6a, true),  // RAL
+            (0x1f, 0x6a, true, 0xb5, false),  // RAR
+        ];
+        for (opcode, a, carry, expected, expected_carry) in cases {
+            let mut cpu = Cpu::new();
+            cpu.registers.flags.carry = carry;
+            run(&mut cpu, &[0x3e, a, opcode, 0x76]);
+            assert_eq!(cpu.registers.a, expected, "opcode {opcode:#04x}");
+            assert_eq!(
+                cpu.registers.flags.carry, expected_carry,
+                "opcode {opcode:#04x}"
+            );
+            assert_eq!(cpu.cycles(), 7 + 4);
+        }
+    }
+
+    #[test]
+    fn cma_stc_and_cmc_flip_bits() {
+        let mut cpu = Cpu::new();
+        // MVI A,51H ; CMA ; STC ; HLT
+        run(&mut cpu, &[0x3e, 0x51, 0x2f, 0x37, 0x76]);
+        assert_eq!(cpu.registers.a, 0xae);
+        assert_eq!(cpu.registers.flags, flags("....C"));
+
+        let mut cpu = Cpu::new();
+        // CMC ; CMC ; CMC ; HLT
+        run(&mut cpu, &[0x3f, 0x3f, 0x3f, 0x76]);
+        assert_eq!(cpu.registers.flags, flags("....C"));
     }
 
     #[test]
