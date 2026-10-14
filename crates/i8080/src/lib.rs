@@ -7,9 +7,11 @@
 
 mod bus;
 mod cpu;
+mod disasm;
 mod registers;
 mod timing;
 
 pub use bus::Bus;
 pub use cpu::Cpu;
+pub use disasm::Instruction;
 pub use registers::{Flags, Registers};
