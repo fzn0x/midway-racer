@@ -56,7 +56,7 @@ export class Keyboard {
     target.addEventListener("keydown", (event) => {
       if (
         !this.enabled ||
-        isTyping(event) ||
+        isForFocusedControl(event) ||
         event.ctrlKey ||
         event.metaKey ||
         event.altKey
@@ -91,12 +91,29 @@ export class Keyboard {
   }
 }
 
-/** Whether the key press is meant for a form control. */
-function isTyping(event: KeyboardEvent): boolean {
+/** Keys that activate a focused button, link or disclosure. */
+const ACTIVATION_KEYS = new Set(["Enter", "NumpadEnter", "Space"]);
+
+/**
+ * Whether the key press belongs to the focused control: anything typed
+ * into a form field, and Enter or Space pressed on a button, link or
+ * disclosure, so the page stays usable from the keyboard alone.
+ */
+function isForFocusedControl(event: KeyboardEvent): boolean {
   const target = event.target;
-  return (
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  if (
+    target.isContentEditable ||
     target instanceof HTMLInputElement ||
     target instanceof HTMLSelectElement ||
     target instanceof HTMLTextAreaElement
+  ) {
+    return true;
+  }
+  return (
+    ACTIVATION_KEYS.has(event.code) &&
+    target.closest("button, a[href], summary, [role='button']") !== null
   );
 }
