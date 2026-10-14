@@ -1,12 +1,14 @@
 import "./styles.css";
 
 import { AudioOutput } from "./audio";
+import { Controls } from "./controls";
 import { byId } from "./dom";
 import { type Command, Keyboard } from "./keyboard";
 import { Loader } from "./loader";
 import { Panel } from "./panel";
 import { clearFiles, loadFiles, saveFiles, type StoredFile } from "./rom-store";
 import { Session } from "./session";
+import { TouchControls } from "./touch";
 import { loadSettings, saveSettings } from "./settings";
 import init, {
   Emulator,
@@ -27,7 +29,7 @@ class App {
   readonly #games: readonly GameDescription[] = supportedGames();
   readonly #loader: Loader;
   readonly #panel: Panel;
-  readonly #keyboard: Keyboard;
+  readonly #controls: Controls;
   readonly #gameSection = byId("game");
   readonly #screen = byId("screen", HTMLCanvasElement);
   readonly #title = byId("game-title");
@@ -62,9 +64,13 @@ class App {
         this.#setSound({ volume, muted: false });
       },
     });
-    this.#keyboard = new Keyboard(window, (command) => {
+    const keyboard = new Keyboard(window, (command) => {
       this.#command(command);
     });
+    const touch = new TouchControls((command) => {
+      this.#command(command);
+    });
+    this.#controls = new Controls(keyboard, touch);
 
     // Browsers only start sound after the player interacts with the page.
     for (const type of ["pointerdown", "keydown"] as const) {
@@ -176,7 +182,7 @@ class App {
       emulator,
       this.#memory,
       this.#screen,
-      this.#keyboard,
+      this.#controls,
       this.#panel,
       this.#audio,
     );

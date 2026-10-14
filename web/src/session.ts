@@ -1,13 +1,8 @@
 /** A game being played: the emulation loop and its inputs and outputs. */
 
 import { AUDIO_LEAD_SECONDS, type AudioOutput } from "./audio";
-import {
-  ACCELERATE,
-  type Keyboard,
-  START,
-  STEER_LEFT,
-  STEER_RIGHT,
-} from "./keyboard";
+import type { Controls } from "./controls";
+import type { PadCommand } from "./gamepad";
 import { audioFramesDue, FrameClock } from "./pacing";
 import type { Panel } from "./panel";
 import { Renderer } from "./renderer";
@@ -21,7 +16,7 @@ export class Session {
   readonly emulator: Emulator;
   readonly #memory: WebAssembly.Memory;
   readonly #renderer: Renderer;
-  readonly #keyboard: Keyboard;
+  readonly #controls: Controls;
   readonly #panel: Panel;
   readonly #audio: AudioOutput | undefined;
   readonly #input = new InputState();
@@ -38,7 +33,7 @@ export class Session {
     emulator: Emulator,
     memory: WebAssembly.Memory,
     canvas: HTMLCanvasElement,
-    keyboard: Keyboard,
+    controls: Controls,
     panel: Panel,
     audio: AudioOutput | undefined,
   ) {
@@ -49,7 +44,7 @@ export class Session {
       emulator.pictureWidth,
       emulator.pictureHeight,
     );
-    this.#keyboard = keyboard;
+    this.#controls = controls;
     this.#panel = panel;
     this.#audio = audio;
   }
@@ -58,7 +53,7 @@ export class Session {
   start(): void {
     this.#clock.restart(performance.now());
     this.#animationFrame = requestAnimationFrame(this.#tick);
-    this.#showPanel();
+    this.#showGear();
   }
 
   /** Stops emulating and frees the emulator. */
@@ -89,12 +84,24 @@ export class Session {
 
   /** Moves the gear shifter to the other gear. */
   shift(): void {
-    this.#highGear = !this.#highGear;
-    this.#showPanel();
+    this.highGear = !this.#highGear;
+  }
+
+  get highGear(): boolean {
+    return this.#highGear;
+  }
+
+  /** Moves the gear shifter to high gear, or to low gear. */
+  set highGear(high: boolean) {
+    this.#highGear = high;
+    this.#showGear();
   }
 
   readonly #tick = (now: number): void => {
     this.#animationFrame = requestAnimationFrame(this.#tick);
+    this.#controls.poll((command) => {
+      this.#padCommand(command);
+    });
     if (this.#paused) {
       return;
     }
@@ -117,7 +124,8 @@ export class Session {
       : this.#clock.framesDue(now);
 
     for (let frame = 0; frame < frames; frame++) {
-      this.#readInput();
+      this.#controls.apply(this.#input);
+      this.#input.highGear = this.#highGear;
       this.emulator.runFrame(this.#input);
       audio?.play(this.emulator.audio());
     }
@@ -127,14 +135,26 @@ export class Session {
     }
   };
 
-  #readInput(): void {
-    const keyboard = this.#keyboard;
-    const input = this.#input;
-    input.left = keyboard.isHeld(STEER_LEFT);
-    input.right = keyboard.isHeld(STEER_RIGHT);
-    input.accelerate = keyboard.isHeld(ACCELERATE);
-    input.start = keyboard.isHeld(START);
-    input.highGear = this.#highGear;
+  #padCommand(command: PadCommand): void {
+    switch (command) {
+      case "coin":
+        this.insertCoin();
+        break;
+      case "shift":
+        this.shift();
+        break;
+      case "low-gear":
+        this.highGear = false;
+        break;
+      case "high-gear":
+        this.highGear = true;
+        break;
+    }
+  }
+
+  #showGear(): void {
+    this.#controls.showGear(this.#highGear);
+    this.#showPanel();
   }
 
   #showPanel(): void {

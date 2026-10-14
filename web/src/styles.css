@@ -276,7 +276,10 @@ code {
 /* The game: a screen in its bezel, and the control panel beside it. */
 
 .game {
+  /* Height taken around the screen by the header, footer and padding. */
   --chrome: 190px;
+  /* Width taken beside the screen by the panel and the gap. */
+  --beside: 280px;
 
   display: flex;
   align-items: center;
@@ -289,10 +292,22 @@ code {
   display: none;
 }
 
+.game:has(.touch-controls:not([hidden])) {
+  --chrome: 290px;
+}
+
+.game__main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .screen {
   position: relative;
   flex: none;
-  width: min(100%, calc((100dvh - var(--chrome)) * 3 / 4));
+  width: min(100vw - var(--beside) - 32px, (100dvh - var(--chrome)) * 3 / 4);
   aspect-ratio: 3 / 4;
   padding: 14px;
   border-radius: 20px;
@@ -304,7 +319,7 @@ code {
 }
 
 .game[data-orientation="horizontal"] .screen {
-  width: min(100%, calc((100dvh - var(--chrome)) * 4 / 3));
+  width: min(100vw - var(--beside) - 32px, (100dvh - var(--chrome)) * 4 / 3);
   aspect-ratio: 4 / 3;
 }
 
@@ -480,6 +495,88 @@ code {
   content: "";
 }
 
+/* Touch controls: a strip that steers like a wheel, and big buttons. */
+
+.touch-controls {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  width: 100%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.touch-controls[hidden] {
+  display: none;
+}
+
+.touch-wheel {
+  --steering: 0;
+
+  position: relative;
+  min-height: 72px;
+  border: 1px solid var(--border);
+  border-radius: 36px;
+  background: var(--surface);
+}
+
+.touch-wheel__label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.touch-wheel__thumb {
+  position: absolute;
+  top: 7px;
+  left: calc(50% - 28px + var(--steering) * (50% - 36px));
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 30%,
+    #ffd9a0,
+    var(--accent) 55%,
+    #b86f12
+  );
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.5);
+}
+
+.touch-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(60px, auto));
+  gap: 8px;
+}
+
+.touch-button {
+  min-height: 72px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  touch-action: none;
+}
+
+.touch-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.touch-button--gas[aria-pressed="true"] {
+  background: var(--accent);
+  color: #1a1206;
+}
+
 /* Sound: volume, mute and the hint to click for sound. */
 
 .sound {
@@ -540,6 +637,7 @@ code {
   .game,
   .game[data-orientation="horizontal"] {
     --chrome: 330px;
+    --beside: 0px;
   }
 
   .panel {

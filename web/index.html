@@ -25,13 +25,49 @@
 
     <main class="stage">
       <section class="game" id="game" aria-label="Game" hidden>
-        <div class="screen">
-          <canvas
-            class="screen__canvas"
-            id="screen"
-            role="img"
-            aria-label="Game screen"
-          ></canvas>
+        <div class="game__main">
+          <div class="screen">
+            <canvas
+              class="screen__canvas"
+              id="screen"
+              role="img"
+              aria-label="Game screen"
+            ></canvas>
+          </div>
+
+          <div
+            class="touch-controls"
+            id="touch-controls"
+            aria-label="Touch controls"
+            hidden
+          >
+            <div class="touch-wheel" id="touch-wheel" aria-hidden="true">
+              <span class="touch-wheel__label">Steer</span>
+              <span class="touch-wheel__thumb"></span>
+            </div>
+            <div class="touch-buttons">
+              <button type="button" class="touch-button" id="touch-coin">
+                Coin
+              </button>
+              <button
+                type="button"
+                class="touch-button"
+                id="touch-gear"
+                aria-label="Gear"
+                aria-pressed="false"
+              >
+                Low
+              </button>
+              <button
+                type="button"
+                class="touch-button touch-button--gas"
+                id="touch-gas"
+                aria-pressed="false"
+              >
+                Gas
+              </button>
+            </div>
+          </div>
         </div>
 
         <aside class="panel" aria-label="Cabinet controls">
