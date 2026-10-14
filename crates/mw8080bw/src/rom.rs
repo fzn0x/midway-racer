@@ -325,6 +325,11 @@ impl ProgramRom {
     pub fn image(&self) -> &[u8; ROM_SIZE] {
         &self.image
     }
+
+    /// Splits the ROM into its game and its image.
+    pub(crate) fn into_parts(self) -> (Game, Box<[u8; ROM_SIZE]>) {
+        (self.game, self.image)
+    }
 }
 
 impl fmt::Debug for ProgramRom {
