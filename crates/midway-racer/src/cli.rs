@@ -14,6 +14,8 @@ Controls:
   1, Enter          Start
   P                 Pause
   F3                Reset
+  M                 Mute
+  -, =              Volume down, up
   Esc               Quit";
 
 /// Play Laguna Racer and 280-ZZZAP on an emulated Midway 8080 board.
@@ -23,6 +25,7 @@ Controls:
 /// or at the individual dump files.
 #[derive(Debug, Parser)]
 #[command(version, about, after_help = CONTROLS)]
+#[expect(clippy::struct_excessive_bools, reason = "command-line flags")]
 pub(crate) struct Args {
     /// ROM zip archives, directories or dump files to load the game from.
     #[arg(value_name = "PATH", default_value = "roms")]
@@ -43,6 +46,18 @@ pub(crate) struct Args {
     /// Draw square pixels instead of the monitor's 4:3 picture.
     #[arg(long)]
     pub(crate) square_pixels: bool,
+
+    /// Sound volume, in percent.
+    #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(0..=200))]
+    pub(crate) volume: u8,
+
+    /// Start with the sound muted.
+    #[arg(long)]
+    pub(crate) mute: bool,
+
+    /// Play without opening an audio device.
+    #[arg(long)]
+    pub(crate) no_sound: bool,
 
     /// Check the ROMs, print what was found and exit.
     #[arg(long)]
@@ -114,6 +129,6 @@ mod tests {
     fn defaults_look_for_a_roms_directory() {
         let args = Args::try_parse_from(["midway-racer"]).unwrap();
         assert_eq!(args.roms, [PathBuf::from("roms")]);
-        assert_eq!(args.scale, 2);
+        assert_eq!((args.scale, args.volume), (2, 100));
     }
 }

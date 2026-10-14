@@ -13,6 +13,7 @@ publish.workspace = true
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+cpal = "0.18"
 minifb = "0.29"
 mw8080bw.workspace = true
 

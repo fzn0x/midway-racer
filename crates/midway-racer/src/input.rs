@@ -14,6 +14,9 @@ pub(crate) enum Command {
     InsertCoin,
     TogglePause,
     Reset,
+    ToggleMute,
+    VolumeDown,
+    VolumeUp,
     Quit,
 }
 
@@ -57,6 +60,9 @@ impl Input {
                 Key::C | Key::Key5 => Command::InsertCoin,
                 Key::P | Key::Pause => Command::TogglePause,
                 Key::F3 => Command::Reset,
+                Key::M => Command::ToggleMute,
+                Key::Minus | Key::NumPadMinus => Command::VolumeDown,
+                Key::Equal | Key::NumPadPlus => Command::VolumeUp,
                 Key::Escape => Command::Quit,
                 _ => continue,
             };

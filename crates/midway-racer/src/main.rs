@@ -1,6 +1,7 @@
 //! Plays Laguna Racer and 280-ZZZAP on an emulated Midway 8080 board.
 
 mod app;
+mod audio;
 mod cli;
 mod display;
 mod input;
@@ -38,5 +39,12 @@ fn main() -> Result<()> {
         info.title, info.manufacturer, info.year
     );
 
-    app::App::new(machine, usize::from(args.scale), args.square_pixels)?.run()
+    let audio = if args.no_sound {
+        None
+    } else {
+        audio::AudioOutput::open()
+            .inspect_err(|error| eprintln!("warning: {error:#}, playing without sound"))
+            .ok()
+    };
+    app::App::new(machine, audio, &args)?.run()
 }

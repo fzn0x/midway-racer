@@ -7,6 +7,8 @@ use minifb::{ScaleMode, Window, WindowOptions};
 use mw8080bw::timing::FRAME_RATE_HZ;
 use mw8080bw::{Gear, Machine};
 
+use crate::audio::AudioOutput;
+use crate::cli::Args;
 use crate::display::Display;
 use crate::input::{Command, Input};
 
@@ -15,6 +17,13 @@ const FRAME_SECONDS: f32 = (1.0 / FRAME_RATE_HZ) as f32;
 /// Most frames emulated at once to catch up. Longer stalls, such as while
 /// the window is dragged, are skipped rather than fast-forwarded.
 const MAX_CATCH_UP_FRAMES: u64 = 4;
+/// Sound kept queued ahead of the audio device, in seconds: enough to
+/// ride out the main loop's sleeps.
+const AUDIO_LEAD_SECONDS: f64 = 0.066;
+/// Volume change per key press, in percent.
+const VOLUME_STEP: u8 = 10;
+/// Loudest volume, in percent.
+const MAX_VOLUME: u8 = 200;
 
 /// The emulator window and everything it drives.
 pub(crate) struct App {
@@ -22,16 +31,24 @@ pub(crate) struct App {
     window: Window,
     display: Display,
     input: Input,
+    /// Paces emulation by the sound card's clock when there is sound.
+    audio: Option<AudioOutput>,
+    /// Paces emulation by the wall clock when there is no sound.
     clock: FrameClock,
+    volume: u8,
+    muted: bool,
     paused: bool,
     title: String,
 }
 
 impl App {
-    /// Opens a window showing the machine's picture `scale` times its
-    /// original size.
-    pub(crate) fn new(machine: Machine, scale: usize, square_pixels: bool) -> Result<Self> {
-        let display = Display::new(machine.game(), scale, square_pixels);
+    /// Opens a window for `machine`, playing its sound through `audio`.
+    pub(crate) fn new(
+        mut machine: Machine,
+        audio: Option<AudioOutput>,
+        args: &Args,
+    ) -> Result<Self> {
+        let display = Display::new(machine.game(), usize::from(args.scale), args.square_pixels);
         let (width, height) = display.size();
         let title = machine.game().info().title.to_owned();
         let options = WindowOptions {
@@ -42,13 +59,19 @@ impl App {
         let mut window =
             Window::new(&title, width, height, options).context("cannot open a window")?;
         window.set_target_fps(60);
+        if let Some(audio) = &audio {
+            machine.enable_audio(audio.sample_rate());
+        }
 
         Ok(Self {
             machine,
             window,
             display,
             input: Input::default(),
+            audio,
             clock: FrameClock::new(),
+            volume: args.volume,
+            muted: args.mute,
             paused: false,
             title,
         })
@@ -65,11 +88,14 @@ impl App {
                         self.clock = FrameClock::new();
                     }
                     Command::Reset => self.machine.reset(),
+                    Command::ToggleMute => self.muted = !self.muted,
+                    Command::VolumeDown => self.set_volume(self.volume.saturating_sub(VOLUME_STEP)),
+                    Command::VolumeUp => self.set_volume(self.volume.saturating_add(VOLUME_STEP)),
                     Command::Quit => return Ok(()),
                 }
             }
             if !self.paused {
-                for _ in 0..self.clock.frames_due(self.clock.start.elapsed()) {
+                for _ in 0..self.frames_due() {
                     self.emulate_frame();
                 }
             }
@@ -78,10 +104,45 @@ impl App {
         Ok(())
     }
 
+    fn set_volume(&mut self, volume: u8) {
+        self.volume = volume.min(MAX_VOLUME);
+        self.muted = false;
+    }
+
+    /// Returns how many frames to emulate now: enough to keep the audio
+    /// device fed, or to keep up with the wall clock without sound.
+    fn frames_due(&mut self) -> u64 {
+        if self.audio.as_ref().is_some_and(AudioOutput::has_failed) {
+            eprintln!("warning: lost the audio device, continuing without sound");
+            self.audio = None;
+            self.machine.disable_audio();
+            self.clock = FrameClock::new();
+        }
+        match &self.audio {
+            Some(audio) => audio_frames_due(audio.queued(), audio.sample_rate()),
+            None => self.clock.frames_due(self.clock.start.elapsed()),
+        }
+    }
+
     fn emulate_frame(&mut self) {
         let controls = self.input.controls(&self.window, FRAME_SECONDS);
         self.machine.set_controls(controls);
         self.machine.run_frame();
+
+        if let Some(audio) = &self.audio {
+            let gain = if self.muted {
+                0.0
+            } else {
+                f32::from(self.volume) / 100.0
+            };
+            let samples = self.machine.audio_samples();
+            audio.play(
+                samples
+                    .iter()
+                    .map(|sample| (sample * gain).clamp(-1.0, 1.0))
+                    .collect(),
+            );
+        }
     }
 
     fn present(&mut self) -> Result<()> {
@@ -102,15 +163,36 @@ impl App {
     /// Describes the game's state for the window title.
     fn status(&self) -> String {
         let gear = match self.input.gear() {
-            Gear::Low => "low",
-            Gear::High => "high",
+            Gear::Low => "low gear",
+            Gear::High => "high gear",
         };
-        let mut status = format!("{} - {gear} gear", self.machine.game().info().title);
+        let mut parts = vec![self.machine.game().info().title.to_owned(), gear.to_owned()];
         if self.paused {
-            status.push_str(" - paused");
+            parts.push("paused".to_owned());
         }
-        status
+        if self.audio.is_none() {
+            parts.push("no sound".to_owned());
+        } else if self.muted {
+            parts.push("muted".to_owned());
+        } else if self.volume != 100 {
+            parts.push(format!("volume {}%", self.volume));
+        }
+        parts.join(" - ")
     }
+}
+
+/// Returns how many frames to emulate to keep [`AUDIO_LEAD_SECONDS`] of
+/// sound queued, given `queued` samples waiting at `sample_rate`.
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    reason = "sample counts are small and the frame count is positive"
+)]
+fn audio_frames_due(queued: usize, sample_rate: u32) -> u64 {
+    let rate = f64::from(sample_rate);
+    let missing = (AUDIO_LEAD_SECONDS * rate - queued as f64).max(0.0);
+    let frames = (missing * FRAME_RATE_HZ / rate).ceil() as u64;
+    frames.min(MAX_CATCH_UP_FRAMES)
 }
 
 /// Paces emulation by the wall clock, at the board's refresh rate.
@@ -162,5 +244,15 @@ mod tests {
         );
         assert_eq!(clock.frames_due(Duration::from_secs(10)), 0);
         assert_eq!(clock.frames_due(Duration::from_millis(10_017)), 1);
+    }
+
+    #[test]
+    fn audio_pacing_tops_up_the_device_queue() {
+        // 66 ms at 48 kHz is 3168 samples, about four frames of 806.
+        assert_eq!(audio_frames_due(0, 48_000), 4);
+        assert_eq!(audio_frames_due(2_000, 48_000), 2);
+        assert_eq!(audio_frames_due(3_000, 48_000), 1);
+        assert_eq!(audio_frames_due(3_168, 48_000), 0);
+        assert_eq!(audio_frames_due(10_000, 44_100), 0);
     }
 }
