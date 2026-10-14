@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/fzn0x/midway-racer"
+publish = false
+
+[workspace.dependencies]
+i8080 = { path = "crates/i8080" }
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Emulating 8- and 16-bit hardware truncates integers on purpose.
+cast_possible_truncation = "allow"
+must_use_candidate = "allow"
+
+[profile.release]
+codegen-units = 1
+lto = true
