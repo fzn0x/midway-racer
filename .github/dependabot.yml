@@ -12,7 +12,7 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: github-actions
-    directory: /
+    directories: ["/", "/.github/actions/*"]
     schedule:
       interval: weekly
     commit-message:
@@ -20,4 +20,15 @@ updates:
       include: scope
     groups:
       actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      npm:
         patterns: ["*"]
