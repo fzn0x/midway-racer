@@ -52,6 +52,7 @@ pub struct Machine {
     /// CPU cycle at which the next frame starts.
     frame_start: u64,
     frame: u64,
+    watchdog_resets: u64,
 }
 
 impl Machine {
@@ -77,6 +78,7 @@ impl Machine {
             audio: None,
             frame_start: 0,
             frame: 0,
+            watchdog_resets: 0,
         }
     }
 
@@ -174,6 +176,7 @@ impl Machine {
                     .render_line(line as usize, self.board.memory.video_ram());
             }
             if self.board.watchdog.has_fired(self.cpu.cycles()) {
+                self.watchdog_resets += 1;
                 self.reset();
             }
         }
@@ -190,6 +193,12 @@ impl Machine {
     /// Returns how many frames have run since power-up.
     pub fn frame(&self) -> u64 {
         self.frame
+    }
+
+    /// Returns how many times the watchdog has reset the board. A running
+    /// game keeps retriggering it, so resets point at a crash.
+    pub fn watchdog_resets(&self) -> u64 {
+        self.watchdog_resets
     }
 
     /// Returns the values last written to the sound board's latches.
@@ -474,6 +483,7 @@ mod tests {
             machine.run_frame();
         }
         assert_eq!(machine.ram()[2], 2, "rebooted once after 1.1 s");
+        assert_eq!(machine.watchdog_resets(), 1);
 
         #[rustfmt::skip]
         let kick = [
@@ -487,6 +497,7 @@ mod tests {
             machine.run_frame();
         }
         assert_eq!(machine.ram()[2], 1);
+        assert_eq!(machine.watchdog_resets(), 0);
     }
 
     #[test]
