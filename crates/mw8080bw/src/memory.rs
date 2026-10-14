@@ -17,3 +17,5 @@ pub const RAM_SIZE: usize = 0x2000;
 /// Offset of video RAM within the RAM: the part the video hardware scans
 /// out during the visible lines.
 pub const VIDEO_RAM_OFFSET: usize = 0x0400;
+/// Size of video RAM, in bytes.
+pub const VIDEO_RAM_SIZE: usize = RAM_SIZE - VIDEO_RAM_OFFSET;

@@ -11,9 +11,12 @@ pub mod game;
 pub mod mb14241;
 pub mod memory;
 pub mod rom;
+pub mod timing;
+pub mod video;
 mod zip;
 
 pub use game::{DipSetting, DipSwitch, Game, GameInfo, Orientation, OverlayBand, Rgb, RomChip};
 pub use mb14241::Mb14241;
 pub use rom::{ChipCheck, ChipStatus, ProgramRom, RomError, RomFile, RomFiles, RomReport};
+pub use video::{SCREEN_HEIGHT, SCREEN_WIDTH, Screen};
 pub use zip::ZipError;
