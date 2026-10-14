@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "i8080"
 version = "0.1.0"
+
+[[package]]
+name = "mw8080bw"
+version = "0.1.0"
+dependencies = [
+ "i8080",
+]
