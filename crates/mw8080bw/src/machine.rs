@@ -7,8 +7,10 @@ use crate::game::Game;
 use crate::mb14241::Mb14241;
 use crate::memory::{Memory, RAM_SIZE};
 use crate::rom::ProgramRom;
-use crate::sound::SoundLatches;
-use crate::timing::{CYCLES_PER_FRAME, CYCLES_PER_LINE, LINES_PER_FRAME, VISIBLE_LINES};
+use crate::sound::{SoundBoard, SoundLatches};
+use crate::timing::{
+    CPU_CLOCK_HZ, CYCLES_PER_FRAME, CYCLES_PER_LINE, LINES_PER_FRAME, VISIBLE_LINES,
+};
 use crate::video::Screen;
 use crate::watchdog::Watchdog;
 
@@ -46,6 +48,7 @@ pub struct Machine {
     cpu: Cpu,
     board: Board,
     screen: Screen,
+    audio: Option<Audio>,
     /// CPU cycle at which the next frame starts.
     frame_start: u64,
     frame: u64,
@@ -67,9 +70,11 @@ impl Machine {
                 dip_switches: game.info().default_dip_switches,
                 coin: CoinMechanism::default(),
                 sound: SoundLatches::default(),
+                sound_log: None,
                 now: 0,
             },
             screen: Screen::new(),
+            audio: None,
             frame_start: 0,
             frame: 0,
         }
@@ -86,9 +91,10 @@ impl Machine {
         let now = self.cpu.cycles();
         self.cpu.reset();
         self.cpu.clear_interrupt();
+        self.board.now = now;
         self.board.shifter = Mb14241::new();
         self.board.watchdog = Watchdog::new(now);
-        self.board.sound = SoundLatches::default();
+        self.board.set_sound(SoundLatches::default());
     }
 
     /// Returns the positions of the cabinet's controls.
@@ -118,11 +124,42 @@ impl Machine {
         self.board.dip_switches = dip_switches;
     }
 
+    /// Starts synthesizing the sound board at `sample_rate` samples per
+    /// second. Each frame then produces about `sample_rate / 59.54`
+    /// samples, available from [`Machine::audio_samples`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `sample_rate` is zero.
+    pub fn enable_audio(&mut self, sample_rate: u32) {
+        let mut board = SoundBoard::new(self.game, sample_rate);
+        board.set_latches(self.board.sound);
+        self.audio = Some(Audio {
+            board,
+            samples: Vec::new(),
+            produced: sample_index(self.cpu.cycles(), sample_rate),
+        });
+        self.board.sound_log = Some(Vec::new());
+    }
+
+    /// Stops synthesizing sound.
+    pub fn disable_audio(&mut self) {
+        self.audio = None;
+        self.board.sound_log = None;
+    }
+
+    /// Returns the mono samples, in the range -1 to 1, produced by the
+    /// last frame. Empty unless [`Machine::enable_audio`] was called.
+    pub fn audio_samples(&self) -> &[f32] {
+        self.audio.as_ref().map_or(&[], |audio| &audio.samples)
+    }
+
     /// Runs the board for one video frame.
     ///
     /// The CPU runs scan line by scan line, each line being drawn as the
     /// beam passes it, and the two interrupts fire at the lines where the
-    /// hardware raises them.
+    /// hardware raises them. Sound latch changes take effect at the sample
+    /// matching the CPU cycle they happened at.
     pub fn run_frame(&mut self) {
         self.board.coin.advance();
         for line in 0..LINES_PER_FRAME {
@@ -142,6 +179,7 @@ impl Machine {
         }
         self.frame_start += u64::from(CYCLES_PER_FRAME);
         self.frame += 1;
+        self.render_audio();
     }
 
     /// Returns the picture drawn during the last frame.
@@ -190,6 +228,46 @@ impl Machine {
             self.cpu.step(&mut self.board);
         }
     }
+
+    /// Synthesizes the frame's sound, applying each latch write at the
+    /// sample it happened at.
+    fn render_audio(&mut self) {
+        let (Some(audio), Some(log)) = (&mut self.audio, &mut self.board.sound_log) else {
+            return;
+        };
+        audio.samples.clear();
+        for (cycle, latches) in log.drain(..) {
+            audio.render_until(cycle);
+            audio.board.set_latches(latches);
+        }
+        audio.render_until(self.cpu.cycles());
+    }
+}
+
+/// The sound board and the samples it produced during the last frame.
+#[derive(Debug)]
+struct Audio {
+    board: SoundBoard,
+    samples: Vec<f32>,
+    /// Samples produced since power-up.
+    produced: u64,
+}
+
+impl Audio {
+    /// Produces the samples due by CPU cycle `cycle`.
+    fn render_until(&mut self, cycle: u64) {
+        let due = sample_index(cycle, self.board.sample_rate());
+        let count = due.saturating_sub(self.produced);
+        let start = self.samples.len();
+        self.samples.resize(start + count as usize, 0.0);
+        self.board.render(&mut self.samples[start..]);
+        self.produced += count;
+    }
+}
+
+/// Returns the index of the sample playing at CPU cycle `cycle`.
+fn sample_index(cycle: u64, sample_rate: u32) -> u64 {
+    cycle * u64::from(sample_rate) / u64::from(CPU_CLOCK_HZ)
 }
 
 /// Everything the CPU reaches over its bus.
@@ -202,11 +280,21 @@ struct Board {
     dip_switches: u8,
     coin: CoinMechanism,
     sound: SoundLatches,
+    /// While audio is enabled, every change of the sound latches and the
+    /// CPU cycle it happened at.
+    sound_log: Option<Vec<(u64, SoundLatches)>>,
     /// CPU cycle at which the current instruction started.
     now: u64,
 }
 
 impl Board {
+    fn set_sound(&mut self, latches: SoundLatches) {
+        self.sound = latches;
+        if let Some(log) = &mut self.sound_log {
+            log.push((self.now, latches));
+        }
+    }
+
     /// Input port 0: pedal in bits 0–3, gear in bit 4, and the active-low
     /// coin and start switches in bits 6 and 7.
     fn input_port_0(&self) -> u8 {
@@ -245,10 +333,16 @@ impl Bus for Board {
 
     fn output(&mut self, port: u8, value: u8) {
         match port & 0b111 {
-            2 => self.sound.engine = value,
+            2 => self.set_sound(SoundLatches {
+                engine: value,
+                ..self.sound
+            }),
             3 => self.shifter.write_data(value),
             4 => self.shifter.write_amount(value),
-            5 => self.sound.effects = value,
+            5 => self.set_sound(SoundLatches {
+                effects: value,
+                ..self.sound
+            }),
             7 => self.watchdog.kick(self.now),
             _ => {}
         }
@@ -451,6 +545,52 @@ mod tests {
         assert_eq!(machine.sound_latches(), SoundLatches::default());
         assert_eq!(machine.cpu().registers.pc, 0);
         assert_eq!(machine.ram()[0x20], 0x85, "RAM survives a reset");
+    }
+
+    #[test]
+    fn audio_produces_one_frames_worth_of_samples_per_frame() {
+        let mut machine = boot(&[0xc3, 0x00, 0x00]); // JMP 0000H
+        assert_eq!(machine.audio_samples(), []);
+
+        machine.run_frame();
+        machine.enable_audio(48_000);
+        let start = sample_index(machine.cpu().cycles(), 48_000);
+        let mut total = 0;
+        for _ in 0..60 {
+            machine.run_frame();
+            let count = machine.audio_samples().len();
+            assert!((805..=807).contains(&count), "{count}");
+            total += count as u64;
+        }
+        let expected = sample_index(machine.cpu().cycles(), 48_000) - start;
+        assert_eq!(total, expected);
+
+        machine.disable_audio();
+        machine.run_frame();
+        assert_eq!(machine.audio_samples(), []);
+    }
+
+    #[test]
+    fn latch_writes_reach_the_sound_board_in_order() {
+        #[rustfmt::skip]
+        let program = [
+            0x3e, 0x2f, 0xd3, 0x02, // MVI A,2FH ; OUT 2
+            0x3e, 0x01, 0xd3, 0x05, // MVI A,01H ; OUT 5
+            0x3e, 0x06, 0xd3, 0x05, // MVI A,06H ; OUT 5
+            0x76,                   // HLT
+        ];
+        let mut machine = boot(&program);
+        machine.enable_audio(44_100);
+        machine.run_frame();
+
+        let audio = machine.audio.as_ref().unwrap();
+        let expected = SoundLatches {
+            engine: 0x2f,
+            effects: 0x06,
+        };
+        assert_eq!(audio.board.latches(), expected);
+        assert_eq!(machine.sound_latches(), expected);
+        assert_eq!(machine.board.sound_log.as_deref(), Some(&[][..]));
     }
 
     #[test]
