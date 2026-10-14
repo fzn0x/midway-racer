@@ -663,6 +663,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "midway-racer-web"
+version = "0.1.0"
+dependencies = [
+ "i8080",
+ "mw8080bw",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "minifb"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
