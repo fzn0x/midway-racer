@@ -8,10 +8,12 @@
 
 mod crc32;
 pub mod game;
+pub mod mb14241;
 pub mod memory;
 pub mod rom;
 mod zip;
 
 pub use game::{DipSetting, DipSwitch, Game, GameInfo, Orientation, OverlayBand, Rgb, RomChip};
+pub use mb14241::Mb14241;
 pub use rom::{ChipCheck, ChipStatus, ProgramRom, RomError, RomFile, RomFiles, RomReport};
 pub use zip::ZipError;
