@@ -3,10 +3,13 @@
 //! The crate is `#![no_std]`, has no dependencies and knows nothing about
 //! the machine it runs in: memory and I/O devices are reached through the
 //! [`Bus`] trait, which the host system implements.
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
 mod bus;
+mod cpu;
 mod registers;
+mod timing;
 
 pub use bus::Bus;
+pub use cpu::Cpu;
 pub use registers::{Flags, Registers};
