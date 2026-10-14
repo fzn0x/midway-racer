@@ -6,7 +6,10 @@
 //! 1-bit 256×224 bitmap, an MB14241 barrel shifter, a watchdog timer and a
 //! discrete-logic sound board.
 
+mod crc32;
 pub mod game;
 pub mod memory;
+pub mod rom;
 
 pub use game::{DipSetting, DipSwitch, Game, GameInfo, Orientation, OverlayBand, Rgb, RomChip};
+pub use rom::{ChipCheck, ChipStatus, ProgramRom, RomError, RomFile, RomFiles, RomReport};
