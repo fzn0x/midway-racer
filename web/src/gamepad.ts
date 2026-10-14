@@ -91,10 +91,12 @@ export class Gamepads {
   /** Reads every gamepad, reporting newly pressed command buttons. */
   poll(onCommand: (command: PadCommand) => void): PadInput {
     let input: PadInput = { ...NEUTRAL_PAD };
+    const connected = new Set<number>();
     for (const pad of navigator.getGamepads()) {
       if (!pad?.connected) {
         continue;
       }
+      connected.add(pad.index);
       const held = pad.buttons.map((button) => button.pressed);
       const before = this.#held.get(pad.index) ?? [];
       for (const [index, command] of COMMAND_BUTTONS) {
@@ -113,6 +115,13 @@ export class Gamepads {
         accelerate: pressed(BUTTON.south),
         start: pressed(BUTTON.start),
       });
+    }
+    // Forget unplugged pads, so a button held as one disconnected does not
+    // swallow the first press after it reconnects.
+    for (const index of this.#held.keys()) {
+      if (!connected.has(index)) {
+        this.#held.delete(index);
+      }
     }
     return input;
   }
