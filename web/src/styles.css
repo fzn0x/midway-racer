@@ -273,6 +273,233 @@ code {
   display: none;
 }
 
+/* The game: a screen in its bezel, and the control panel beside it. */
+
+.game {
+  --chrome: 190px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--gap) * 1.5);
+  width: 100%;
+}
+
+.game[hidden] {
+  display: none;
+}
+
+.screen {
+  position: relative;
+  flex: none;
+  width: min(100%, calc((100dvh - var(--chrome)) * 3 / 4));
+  aspect-ratio: 3 / 4;
+  padding: 14px;
+  border-radius: 20px;
+  background: #050506;
+  box-shadow:
+    inset 0 0 0 1px #24282f,
+    inset 0 2px 18px rgb(0 0 0 / 0.9),
+    0 18px 40px rgb(0 0 0 / 0.45);
+}
+
+.game[data-orientation="horizontal"] .screen {
+  width: min(100%, calc((100dvh - var(--chrome)) * 4 / 3));
+  aspect-ratio: 4 / 3;
+}
+
+.screen__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  background: #000;
+  image-rendering: pixelated;
+}
+
+/* Scanlines follow the raster: across a horizontal monitor, down a
+   vertical one. There are 224 of them. */
+.screen::after {
+  position: absolute;
+  inset: 14px;
+  border-radius: 10px;
+  background:
+    radial-gradient(ellipse at center, transparent 62%, rgb(0 0 0 / 0.35)),
+    linear-gradient(to right, rgb(0 0 0 / 0.28) 0 34%, transparent 34%) 0 0 /
+      calc(100% / 224) 100%;
+  content: "";
+  pointer-events: none;
+}
+
+.game[data-orientation="horizontal"] .screen::after {
+  background:
+    radial-gradient(ellipse at center, transparent 62%, rgb(0 0 0 / 0.35)),
+    linear-gradient(to bottom, rgb(0 0 0 / 0.28) 0 34%, transparent 34%) 0 0 /
+      100% calc(100% / 224);
+}
+
+.panel {
+  display: grid;
+  gap: 20px;
+  width: 220px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.panel__actions {
+  display: grid;
+  gap: 10px;
+}
+
+.panel__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.panel .button--quiet {
+  margin-top: 0;
+}
+
+/* The gear shifter, a toggle between low and high. */
+
+.shifter {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.shifter:focus-visible {
+  outline: 2px solid var(--lagoon);
+  outline-offset: 2px;
+}
+
+.shifter__label:first-child,
+.shifter[aria-pressed="true"] .shifter__label:last-child {
+  color: var(--accent);
+}
+
+.shifter[aria-pressed="true"] .shifter__label:first-child {
+  color: var(--text-muted);
+}
+
+.shifter__gate {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: #0b0d10;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.8);
+}
+
+.shifter__knob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 30%,
+    #ffd9a0,
+    var(--accent) 55%,
+    #b86f12
+  );
+  transform: translate(-25%, -50%);
+  transition: left 140ms ease;
+}
+
+.shifter[aria-pressed="true"] .shifter__knob {
+  left: calc(100% - 13px);
+}
+
+/* Gauges for the wheel and the pedal. */
+
+.gauges {
+  display: grid;
+  gap: 12px;
+}
+
+.gauge {
+  display: grid;
+  gap: 6px;
+}
+
+.gauge__label {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gauge__track {
+  --value: 0;
+
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #0b0d10;
+}
+
+.gauge__fill {
+  position: absolute;
+  inset: 0;
+  background: var(--lagoon);
+  transform: scaleX(var(--value));
+  transform-origin: left;
+}
+
+/* The wheel's fill grows either way from the centre. */
+.gauge__track--centred .gauge__fill {
+  left: 50%;
+  width: 50%;
+}
+
+.gauge__track--centred::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 1px);
+  width: 2px;
+  background: var(--text-muted);
+  content: "";
+}
+
+@media (max-width: 760px) {
+  .game {
+    flex-direction: column;
+  }
+
+  .game,
+  .game[data-orientation="horizontal"] {
+    --chrome: 330px;
+  }
+
+  .panel {
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .panel__actions {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;

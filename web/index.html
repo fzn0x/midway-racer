@@ -24,6 +24,97 @@
     </header>
 
     <main class="stage">
+      <section class="game" id="game" aria-label="Game" hidden>
+        <div class="screen">
+          <canvas
+            class="screen__canvas"
+            id="screen"
+            role="img"
+            aria-label="Game screen"
+          ></canvas>
+        </div>
+
+        <aside class="panel" aria-label="Cabinet controls">
+          <button
+            type="button"
+            class="shifter"
+            id="shifter"
+            aria-pressed="false"
+            title="Shift gear (Space)"
+          >
+            <span class="shifter__label">Low</span>
+            <span class="shifter__gate" aria-hidden="true">
+              <span class="shifter__knob"></span>
+            </span>
+            <span class="shifter__label">High</span>
+          </button>
+
+          <div class="gauges">
+            <div class="gauge">
+              <span class="gauge__label" id="wheel-label">Wheel</span>
+              <div
+                class="gauge__track gauge__track--centred"
+                id="wheel-gauge"
+                role="meter"
+                aria-labelledby="wheel-label"
+                aria-valuemin="-1"
+                aria-valuemax="1"
+                aria-valuenow="0"
+              >
+                <span class="gauge__fill"></span>
+              </div>
+            </div>
+            <div class="gauge">
+              <span class="gauge__label" id="pedal-label">Pedal</span>
+              <div
+                class="gauge__track"
+                id="pedal-gauge"
+                role="meter"
+                aria-labelledby="pedal-label"
+                aria-valuemin="0"
+                aria-valuemax="1"
+                aria-valuenow="0"
+              >
+                <span class="gauge__fill"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel__actions">
+            <button
+              type="button"
+              class="button button--primary"
+              id="insert-coin"
+              title="Insert a coin (C)"
+            >
+              Insert coin
+            </button>
+            <div class="panel__row">
+              <button
+                type="button"
+                class="button"
+                id="pause"
+                aria-pressed="false"
+                title="Pause (P)"
+              >
+                Pause
+              </button>
+              <button
+                type="button"
+                class="button"
+                id="reset"
+                title="Reset the board (F3)"
+              >
+                Reset
+              </button>
+            </div>
+            <button type="button" class="button button--quiet" id="change-game">
+              Change game
+            </button>
+          </div>
+        </aside>
+      </section>
+
       <section class="loader" id="loader" aria-labelledby="loader-heading">
         <h2 id="loader-heading">Load the game's ROMs</h2>
         <p class="loader__lead">
