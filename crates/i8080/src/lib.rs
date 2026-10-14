@@ -6,5 +6,7 @@
 #![no_std]
 
 mod bus;
+mod registers;
 
 pub use bus::Bus;
+pub use registers::{Flags, Registers};
