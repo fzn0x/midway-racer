@@ -2,44 +2,44 @@ import "./styles.css";
 
 import { AudioOutput } from "./audio";
 import { Controls } from "./controls";
+import { closeOnBackdropClick, openDialog, SettingsDialog } from "./dialogs";
 import { byId } from "./dom";
+import { type GameInfo, loadGames } from "./games";
 import { type Command, Keyboard } from "./keyboard";
 import { Loader } from "./loader";
 import { Panel } from "./panel";
-import { clearFiles, loadFiles, saveFiles, type StoredFile } from "./rom-store";
+import { RomCollection } from "./roms";
 import { Session } from "./session";
-import { TouchControls } from "./touch";
 import { loadSettings, saveSettings } from "./settings";
-import init, {
-  Emulator,
-  type GameDescription,
-  RomLibrary,
-  supportedGames,
-} from "./wasm/midway_racer_web.js";
+import { TouchControls } from "./touch";
+import init, { Emulator } from "./wasm/midway_racer_web.js";
 
-/** Files larger than this cannot be ROM sets of these games and are ignored. */
-const MAX_FILE_SIZE = 4 * 1024 * 1024;
 /** Volume change per key press. */
 const VOLUME_STEP = 0.1;
+const DEFAULT_SUBTITLE = "Intel 8080 arcade emulator";
 
 class App {
   readonly #memory: WebAssembly.Memory;
   readonly #audio: AudioOutput | undefined;
   readonly #settings = loadSettings();
-  readonly #games: readonly GameDescription[] = supportedGames();
+  readonly #games: readonly GameInfo[] = loadGames();
+  readonly #roms = new RomCollection();
   readonly #loader: Loader;
   readonly #panel: Panel;
+  readonly #keyboard: Keyboard;
   readonly #controls: Controls;
+  readonly #settingsDialog: SettingsDialog;
+  readonly #helpDialog = byId("help-dialog", HTMLDialogElement);
   readonly #gameSection = byId("game");
   readonly #screen = byId("screen", HTMLCanvasElement);
-  readonly #title = byId("game-title");
-  #files = new Map<string, StoredFile>();
-  #library = new RomLibrary();
+  readonly #subtitle = byId("game-title");
   #session: Session | undefined;
+  #game: GameInfo | undefined;
 
   constructor(memory: WebAssembly.Memory, audio: AudioOutput | undefined) {
     this.#memory = memory;
     this.#audio = audio;
+
     this.#loader = new Loader(this.#games, {
       addFiles: (files) => void this.#addFiles(files),
       play: (shortName) => {
@@ -64,13 +64,34 @@ class App {
         this.#setSound({ volume, muted: false });
       },
     });
-    const keyboard = new Keyboard(window, (command) => {
+    this.#keyboard = new Keyboard(window, (command) => {
       this.#command(command);
     });
     const touch = new TouchControls((command) => {
       this.#command(command);
     });
-    this.#controls = new Controls(keyboard, touch);
+    this.#controls = new Controls(this.#keyboard, touch);
+
+    this.#settingsDialog = new SettingsDialog(this.#settings, {
+      displayChanged: () => {
+        saveSettings(this.#settings);
+        this.#applyDisplay();
+      },
+      dipSwitchesChanged: (bank) => {
+        this.#setDipSwitches(bank);
+      },
+    });
+    closeOnBackdropClick(this.#helpDialog);
+    byId("open-help").addEventListener("click", () => {
+      this.#openDialog(this.#helpDialog);
+    });
+    byId("open-settings").addEventListener("click", () => {
+      this.#settingsDialog.showGame(
+        this.#game,
+        this.#session?.emulator.dipSwitches ?? 0,
+      );
+      this.#openDialog(this.#settingsDialog.dialog);
+    });
 
     // Browsers only start sound after the player interacts with the page.
     for (const type of ["pointerdown", "keydown"] as const) {
@@ -82,6 +103,7 @@ class App {
       this.#setSound({});
     });
     this.#setSound({});
+    this.#applyDisplay();
   }
 
   /**
@@ -89,29 +111,26 @@ class App {
    * the game when they hold exactly one playable set.
    */
   async start(): Promise<void> {
-    const stored = await loadFiles().catch((error: unknown) => {
-      console.warn("cannot read stored ROM files", error);
-      return [];
-    });
-    for (const file of stored) {
-      this.#files.set(file.name, file);
-    }
-    const problems = this.#rebuildLibrary();
+    const { count, problems } = await this.#roms.restore();
     this.#loader.setStatus(
-      stored.length > 0
-        ? `Restored ${plural(stored.length, "file")} from your last visit.`
+      count > 0
+        ? `Restored ${plural(count, "file")} from your last visit.`
         : "",
     );
     this.#reportProblems(problems);
-    this.#loader.render(this.#library);
+    this.#loader.render(this.#roms.library);
 
-    const playable = this.#playableGames();
+    const playable = this.#roms.playableGames(this.#games);
     if (playable.length === 1 && playable[0]) {
       this.#play(playable[0]);
     }
   }
 
   #command(command: Command): void {
+    if (command === "help") {
+      this.#openDialog(this.#helpDialog);
+      return;
+    }
     const session = this.#session;
     if (!session) {
       return;
@@ -147,6 +166,25 @@ class App {
     }
   }
 
+  /** Opens a dialog, pausing the game and freeing the keyboard meanwhile. */
+  #openDialog(dialog: HTMLDialogElement): void {
+    if (dialog.open) {
+      return;
+    }
+    const session = this.#session;
+    const wasPaused = session?.paused ?? false;
+    if (session) {
+      session.paused = true;
+    }
+    this.#keyboard.enabled = false;
+    openDialog(dialog, () => {
+      this.#keyboard.enabled = true;
+      if (session && session === this.#session) {
+        session.paused = wasPaused;
+      }
+    });
+  }
+
   /** Changes the sound settings, applies and remembers them. */
   #setSound(change: { volume?: number; muted?: boolean }): void {
     const settings = this.#settings;
@@ -171,13 +209,41 @@ class App {
     });
   }
 
+  #applyDisplay(): void {
+    const section = this.#gameSection;
+    section.dataset.crt = this.#settings.crt ? "on" : "off";
+    section.dataset.pixels = this.#settings.squarePixels ? "square" : "monitor";
+  }
+
+  /** Sets the running game's DIP switches and remembers them. */
+  #setDipSwitches(bank: number): void {
+    const game = this.#game;
+    if (!game || !this.#session) {
+      return;
+    }
+    this.#session.emulator.dipSwitches = bank;
+    this.#settings.dipSwitches[game.shortName] = bank;
+    saveSettings(this.#settings);
+  }
+
   #play(shortName: string): void {
+    const game = this.#games.find(
+      (candidate) => candidate.shortName === shortName,
+    );
+    if (!game) {
+      return;
+    }
     this.#session?.stop();
     const emulator = new Emulator(
-      this.#library,
+      this.#roms.library,
       shortName,
       this.#audio?.sampleRate ?? 0,
     );
+    const dipSwitches = this.#settings.dipSwitches[shortName];
+    if (dipSwitches !== undefined) {
+      emulator.dipSwitches = dipSwitches;
+    }
+    this.#game = game;
     this.#session = new Session(
       emulator,
       this.#memory,
@@ -189,7 +255,7 @@ class App {
     this.#gameSection.dataset.orientation = emulator.vertical
       ? "vertical"
       : "horizontal";
-    this.#title.textContent = `${emulator.title} · insert a coin with C`;
+    this.#subtitle.textContent = `${game.title} · ${game.manufacturer}, ${String(game.year)}`;
     this.#loader.visible = false;
     this.#gameSection.hidden = false;
     this.#session.start();
@@ -204,74 +270,24 @@ class App {
   #changeGame(): void {
     this.#session?.stop();
     this.#session = undefined;
+    this.#game = undefined;
     this.#gameSection.hidden = true;
-    this.#title.textContent = "Intel 8080 arcade emulator";
-    this.#loader.render(this.#library);
+    this.#subtitle.textContent = DEFAULT_SUBTITLE;
+    this.#loader.render(this.#roms.library);
     this.#loader.visible = true;
   }
 
-  /** Returns the short names of the games the library can run. */
-  #playableGames(): string[] {
-    if (this.#library.fileCount === 0) {
-      return [];
-    }
-    return this.#games
-      .map((game) => game.shortName)
-      .filter((shortName) =>
-        this.#library.check(shortName).every((chip) => chip.usable),
-      );
-  }
-
   async #addFiles(files: File[]): Promise<void> {
-    const ignored: string[] = [];
-    for (const file of files) {
-      if (file.size > MAX_FILE_SIZE) {
-        ignored.push(file.name);
-        continue;
-      }
-      this.#files.set(file.name, {
-        name: file.name,
-        data: await file.arrayBuffer(),
-      });
-    }
-    const problems = this.#rebuildLibrary();
-
+    const problems = await this.#roms.add(files);
     this.#loader.setStatus(`Checked ${plural(files.length, "file")}.`);
-    if (ignored.length > 0) {
-      problems.push(`${ignored.join(", ")}: too large to be a ROM set`);
-    }
     this.#reportProblems(problems);
-    this.#loader.render(this.#library);
-
-    await saveFiles([...this.#files.values()]).catch((error: unknown) => {
-      console.warn("cannot store ROM files", error);
-    });
+    this.#loader.render(this.#roms.library);
   }
 
   async #forget(): Promise<void> {
-    this.#files.clear();
-    this.#rebuildLibrary();
+    await this.#roms.forget();
     this.#loader.setStatus("Forgot the ROM files.");
-    this.#loader.render(this.#library);
-    await clearFiles().catch((error: unknown) => {
-      console.warn("cannot clear stored ROM files", error);
-    });
-  }
-
-  /** Reads every file into a fresh library and returns the files it rejected. */
-  #rebuildLibrary(): string[] {
-    this.#library.free();
-    this.#library = new RomLibrary();
-    const problems: string[] = [];
-    for (const file of this.#files.values()) {
-      try {
-        this.#library.addFile(file.name, new Uint8Array(file.data));
-      } catch (error) {
-        problems.push(errorMessage(error));
-        this.#files.delete(file.name);
-      }
-    }
-    return problems;
+    this.#loader.render(this.#roms.library);
   }
 
   #reportProblems(problems: readonly string[]): void {
@@ -288,10 +304,6 @@ function plural(count: number, noun: string): string {
   return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 async function main(): Promise<void> {
   const { memory } = await init();
   const audio = await AudioOutput.create().catch((error: unknown) => {
@@ -305,7 +317,8 @@ main().catch((error: unknown) => {
   console.error(error);
   const status = document.getElementById("loader-status");
   if (status) {
-    status.textContent = `The emulator could not start: ${errorMessage(error)}`;
+    const message = error instanceof Error ? error.message : String(error);
+    status.textContent = `The emulator could not start: ${message}`;
     status.dataset.tone = "error";
   }
 });

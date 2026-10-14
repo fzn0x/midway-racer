@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "./settings";
 
+const KEY = "midway-racer:settings";
+
 /** An in-memory stand-in for `localStorage`. */
 function memoryStorage(): Pick<Storage, "getItem" | "setItem"> {
   const items = new Map<string, string>();
@@ -27,22 +29,43 @@ describe("settings", () => {
   });
 
   it("remembers what was saved", () => {
-    saveSettings({ volume: 0.35, muted: true });
-    expect(loadSettings()).toEqual({ volume: 0.35, muted: true });
+    const settings = {
+      volume: 0.35,
+      muted: true,
+      crt: false,
+      squarePixels: true,
+      dipSwitches: { lagunar: 0x24 },
+    };
+    saveSettings(settings);
+    expect(loadSettings()).toEqual(settings);
   });
 
   it("repairs invalid or tampered values", () => {
     localStorage.setItem(
-      "midway-racer:settings",
-      '{"volume": 7, "muted": "yes"}',
+      KEY,
+      JSON.stringify({
+        volume: 7,
+        muted: "yes",
+        crt: 0,
+        dipSwitches: { lagunar: 300, "280zzzap": 1.5, "280zzzapa": 0xc0 },
+      }),
     );
-    expect(loadSettings()).toEqual({ volume: 1, muted: false });
+    expect(loadSettings()).toEqual({
+      ...DEFAULT_SETTINGS,
+      volume: 1,
+      dipSwitches: { "280zzzapa": 0xc0 },
+    });
 
-    localStorage.setItem("midway-racer:settings", "not json");
+    localStorage.setItem(KEY, "not json");
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
-    localStorage.setItem("midway-racer:settings", "null");
+    localStorage.setItem(KEY, "[1, 2]");
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it("does not share the default DIP switch record", () => {
+    loadSettings().dipSwitches.lagunar = 1;
+    expect(DEFAULT_SETTINGS.dipSwitches).toEqual({});
   });
 
   it("survives storage being unavailable", () => {

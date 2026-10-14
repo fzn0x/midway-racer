@@ -52,6 +52,11 @@ h3 {
   line-height: 1.2;
 }
 
+.topbar__actions {
+  display: flex;
+  gap: 8px;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -307,8 +312,6 @@ code {
 .screen {
   position: relative;
   flex: none;
-  width: min(100vw - var(--beside) - 32px, (100dvh - var(--chrome)) * 3 / 4);
-  aspect-ratio: 3 / 4;
   padding: 14px;
   border-radius: 20px;
   background: #050506;
@@ -318,18 +321,40 @@ code {
     0 18px 40px rgb(0 0 0 / 0.45);
 }
 
-.game[data-orientation="horizontal"] .screen {
-  width: min(100vw - var(--beside) - 32px, (100dvh - var(--chrome)) * 4 / 3);
-  aspect-ratio: 4 / 3;
-}
-
+/* The picture keeps the monitor's 4:3 shape, turned for a vertical
+   monitor, unless the player asks for square pixels (224 by 260). */
 .screen__canvas {
+  --aspect-width: 3;
+  --aspect-height: 4;
+
   display: block;
-  width: 100%;
-  height: 100%;
+  width: min(
+    100vw - var(--beside) - 60px,
+    (100dvh - var(--chrome)) * var(--aspect-width) / var(--aspect-height)
+  );
+  aspect-ratio: var(--aspect-width) / var(--aspect-height);
   border-radius: 10px;
   background: #000;
   image-rendering: pixelated;
+}
+
+.game[data-orientation="horizontal"] .screen__canvas {
+  --aspect-width: 4;
+  --aspect-height: 3;
+}
+
+.game[data-pixels="square"] .screen__canvas {
+  --aspect-width: 224;
+  --aspect-height: 260;
+}
+
+.game[data-orientation="horizontal"][data-pixels="square"] .screen__canvas {
+  --aspect-width: 260;
+  --aspect-height: 224;
+}
+
+.game[data-crt="off"] .screen::after {
+  display: none;
 }
 
 /* Scanlines follow the raster: across a horizontal monitor, down a
@@ -627,6 +652,143 @@ code {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* Dialogs: help and settings. */
+
+.dialog {
+  width: min(100% - 32px, 36rem);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.6);
+}
+
+.dialog::backdrop {
+  background: rgb(5 6 8 / 0.7);
+  backdrop-filter: blur(2px);
+}
+
+.dialog__body {
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+}
+
+.dialog__body > p {
+  margin: 0;
+}
+
+.dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dialog__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.controls-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.controls-table th,
+.controls-table td {
+  padding: 8px 10px 8px 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.controls-table thead th {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.controls-table tbody th {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0.05em 0.4em;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--surface-raised);
+  font: 0.85em var(--font-mono);
+  text-align: center;
+}
+
+.settings-group {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.settings-group legend {
+  padding: 0 6px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.dip-switches {
+  display: grid;
+  gap: 10px;
+}
+
+.dip-switch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  align-items: center;
+  gap: 12px;
+  font-size: 0.9rem;
+}
+
+.dip-switch select {
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+}
+
+.settings-group .button {
+  justify-self: start;
 }
 
 @media (max-width: 760px) {

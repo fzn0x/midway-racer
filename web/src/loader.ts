@@ -1,7 +1,8 @@
 /** The screen that asks for the game's ROMs and shows what was found. */
 
 import { byId, element } from "./dom";
-import type { GameDescription, RomLibrary } from "./wasm/midway_racer_web.js";
+import type { GameInfo } from "./games";
+import type { RomLibrary } from "./wasm/midway_racer_web.js";
 
 /** What the player does on the loader screen. */
 export interface LoaderActions {
@@ -11,6 +12,32 @@ export interface LoaderActions {
   play(shortName: string): void;
   /** The player wants the stored ROMs forgotten. */
   forget(): void;
+}
+
+/** What was found for one ROM chip. */
+export interface ChipState {
+  readonly name: string;
+  /** `verified`, `mismatch`, `wrong-size` or `missing`. */
+  readonly status: string;
+  readonly detail: string;
+  readonly usable: boolean;
+}
+
+/** Checks the chips of the game called `shortName` against `library`. */
+export function checkChips(
+  library: RomLibrary,
+  shortName: string,
+): ChipState[] {
+  return library.check(shortName).map((report) => {
+    const state: ChipState = {
+      name: report.name,
+      status: report.status,
+      detail: report.detail,
+      usable: report.usable,
+    };
+    report.free();
+    return state;
+  });
 }
 
 const STATUS_TEXT: Readonly<Record<string, string>> = {
@@ -27,10 +54,10 @@ export class Loader {
   readonly #dropZone = byId("drop-zone");
   readonly #input = byId("rom-input", HTMLInputElement);
   readonly #forgetButton = byId("forget-roms", HTMLButtonElement);
-  readonly #games: readonly GameDescription[];
+  readonly #games: readonly GameInfo[];
   readonly #actions: LoaderActions;
 
-  constructor(games: readonly GameDescription[], actions: LoaderActions) {
+  constructor(games: readonly GameInfo[], actions: LoaderActions) {
     this.#games = games;
     this.#actions = actions;
 
@@ -94,7 +121,7 @@ export class Loader {
     this.#sets.replaceChildren();
 
     for (const game of this.#games) {
-      const chips = loaded ? library.check(game.shortName) : undefined;
+      const chips = loaded ? checkChips(library, game.shortName) : undefined;
       if (chips && !chips.some((chip) => chip.status !== "missing")) {
         continue;
       }
@@ -113,8 +140,8 @@ export class Loader {
   }
 
   #renderSet(
-    game: GameDescription,
-    chips: ReturnType<RomLibrary["check"]> | undefined,
+    game: GameInfo,
+    chips: readonly ChipState[] | undefined,
   ): HTMLElement {
     const card = element("article", { className: "rom-set" });
     const header = element("header", { className: "rom-set__header" });

@@ -21,6 +21,25 @@
         <h1>Midway Racer</h1>
         <p class="subtitle" id="game-title">Intel 8080 arcade emulator</p>
       </div>
+      <nav class="topbar__actions" aria-label="Help and settings">
+        <button
+          type="button"
+          class="button button--small"
+          id="open-help"
+          aria-haspopup="dialog"
+          title="Help (H)"
+        >
+          Help
+        </button>
+        <button
+          type="button"
+          class="button button--small"
+          id="open-settings"
+          aria-haspopup="dialog"
+        >
+          Settings
+        </button>
+      </nav>
     </header>
 
     <main class="stage">
@@ -214,6 +233,122 @@
         </button>
       </section>
     </main>
+
+    <dialog class="dialog" id="help-dialog" aria-labelledby="help-heading">
+      <form method="dialog" class="dialog__body">
+        <header class="dialog__header">
+          <h2 id="help-heading">How to play</h2>
+          <button class="button button--small" value="close">Close</button>
+        </header>
+        <p>
+          Race against the clock and score as much as you can. Reach the score
+          set by the operator's DIP switches to earn extended time. The
+          accelerator sets your speed: low gear pulls hard out of the curves,
+          high gear reaches top speed.
+        </p>
+        <table class="controls-table">
+          <thead>
+            <tr>
+              <th scope="col">Action</th>
+              <th scope="col">Keyboard</th>
+              <th scope="col">Gamepad</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Steer</th>
+              <td><kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd></td>
+              <td>Left stick, d-pad</td>
+            </tr>
+            <tr>
+              <th scope="row">Accelerate</th>
+              <td><kbd>↑</kbd> or <kbd>W</kbd></td>
+              <td>Right trigger, A</td>
+            </tr>
+            <tr>
+              <th scope="row">Shift gear</th>
+              <td><kbd>Space</kbd> or <kbd>Shift</kbd></td>
+              <td>X, or LB and RB for low and high</td>
+            </tr>
+            <tr>
+              <th scope="row">Insert coin</th>
+              <td><kbd>C</kbd> or <kbd>5</kbd></td>
+              <td>Back</td>
+            </tr>
+            <tr>
+              <th scope="row">Start</th>
+              <td><kbd>1</kbd> or <kbd>Enter</kbd></td>
+              <td>Start</td>
+            </tr>
+            <tr>
+              <th scope="row">Pause</th>
+              <td><kbd>P</kbd></td>
+              <td></td>
+            </tr>
+            <tr>
+              <th scope="row">Reset</th>
+              <td><kbd>F3</kbd></td>
+              <td></td>
+            </tr>
+            <tr>
+              <th scope="row">Sound</th>
+              <td>
+                <kbd>M</kbd> mutes, <kbd>-</kbd> <kbd>=</kbd> change volume
+              </td>
+              <td></td>
+            </tr>
+            <tr>
+              <th scope="row">Help</th>
+              <td><kbd>H</kbd> or <kbd>F1</kbd></td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="dialog__note">
+          On a touch screen, drag along the strip under the screen to steer, and
+          hold Gas to accelerate.
+        </p>
+      </form>
+    </dialog>
+
+    <dialog
+      class="dialog"
+      id="settings-dialog"
+      aria-labelledby="settings-heading"
+    >
+      <form method="dialog" class="dialog__body">
+        <header class="dialog__header">
+          <h2 id="settings-heading">Settings</h2>
+          <button class="button button--small" value="close">Close</button>
+        </header>
+
+        <fieldset class="settings-group">
+          <legend>Display</legend>
+          <label class="toggle">
+            <input type="checkbox" id="setting-crt" />
+            CRT scanlines
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="setting-square-pixels" />
+            Square pixels instead of the monitor's 4:3 shape
+          </label>
+        </fieldset>
+
+        <fieldset class="settings-group">
+          <legend>Operator DIP switches</legend>
+          <p class="dialog__note" id="dip-note"></p>
+          <div class="dip-switches" id="dip-switches"></div>
+          <button
+            type="button"
+            class="button button--small"
+            id="dip-defaults"
+            hidden
+          >
+            Restore factory settings
+          </button>
+        </fieldset>
+      </form>
+    </dialog>
 
     <footer class="footer">
       <p>

@@ -2,7 +2,14 @@
 
 /** Something a key press asks for, besides driving. */
 export type Command =
-  "coin" | "pause" | "reset" | "shift" | "mute" | "volume-down" | "volume-up";
+  | "coin"
+  | "pause"
+  | "reset"
+  | "shift"
+  | "mute"
+  | "volume-down"
+  | "volume-up"
+  | "help";
 
 export const STEER_LEFT = ["ArrowLeft", "KeyA"] as const;
 export const STEER_RIGHT = ["ArrowRight", "KeyD"] as const;
@@ -23,6 +30,8 @@ const COMMANDS: Readonly<Partial<Record<string, Command>>> = {
   NumpadSubtract: "volume-down",
   Equal: "volume-up",
   NumpadAdd: "volume-up",
+  KeyH: "help",
+  F1: "help",
 };
 
 /** Keys the game owns, whose default actions such as scrolling are blocked. */
