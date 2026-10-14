@@ -1,5 +1,7 @@
 //! The games that run on the racing variant of the board.
 
+use crate::video::{SCREEN_HEIGHT, SCREEN_WIDTH};
+
 /// A game supported by the emulator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Game {
@@ -78,6 +80,16 @@ pub enum Orientation {
     /// Mounted on its side, rotated 90° clockwise, showing a portrait
     /// picture (MAME's `ROT90`).
     Vertical,
+}
+
+impl Orientation {
+    /// Returns the width and height of the picture the player sees.
+    pub const fn picture_size(self) -> (usize, usize) {
+        match self {
+            Self::Horizontal => (SCREEN_WIDTH, SCREEN_HEIGHT),
+            Self::Vertical => (SCREEN_HEIGHT, SCREEN_WIDTH),
+        }
+    }
 }
 
 /// A group of DIP switches that together select one setting.

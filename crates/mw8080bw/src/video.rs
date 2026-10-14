@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+use crate::game::{Game, Orientation, Rgb};
 use crate::memory::VIDEO_RAM_SIZE;
 use crate::timing::VISIBLE_LINES;
 
@@ -60,6 +61,58 @@ impl Screen {
     pub fn render(&mut self, video_ram: &[u8]) {
         for y in 0..SCREEN_HEIGHT {
             self.render_line(y, video_ram);
+        }
+    }
+
+    /// Draws the picture the player of `game` sees into `out`: rotated to
+    /// the cabinet's monitor orientation and tinted by its overlay film.
+    /// `encode` turns each colour into the caller's pixel format.
+    ///
+    /// The picture has the size [`Orientation::picture_size`] gives,
+    /// row by row.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `out` does not hold exactly one picture.
+    pub fn draw_picture<P: Copy>(&self, game: Game, out: &mut [P], encode: impl Fn(Rgb) -> P) {
+        let info = game.info();
+        let (width, height) = info.orientation.picture_size();
+        assert_eq!(
+            out.len(),
+            width * height,
+            "the output must hold one picture"
+        );
+
+        let dark = encode(Rgb::BLACK);
+        let lit: [P; SCREEN_HEIGHT] = std::array::from_fn(|y| {
+            let band = info
+                .overlay
+                .iter()
+                .find(|band| (band.top..band.bottom).contains(&y));
+            encode(band.map_or(Rgb::WHITE, |band| band.color))
+        });
+        let color = |x: usize, y: usize| {
+            if self.pixels[y * SCREEN_WIDTH + x] == 0 {
+                dark
+            } else {
+                lit[y]
+            }
+        };
+
+        match info.orientation {
+            Orientation::Horizontal => {
+                for (index, pixel) in out.iter_mut().enumerate() {
+                    *pixel = color(index % SCREEN_WIDTH, index / SCREEN_WIDTH);
+                }
+            }
+            // Turning the monitor clockwise takes raster pixel (x, y) to
+            // picture pixel (SCREEN_HEIGHT - 1 - y, x).
+            Orientation::Vertical => {
+                for (index, pixel) in out.iter_mut().enumerate() {
+                    let (column, row) = (index % SCREEN_HEIGHT, index / SCREEN_HEIGHT);
+                    *pixel = color(row, SCREEN_HEIGHT - 1 - column);
+                }
+            }
         }
     }
 
@@ -129,5 +182,61 @@ mod tests {
         screen.render_line(10, &video_ram);
         assert!(screen.is_lit(4, 10));
         assert!(!screen.is_lit(4, 9) && !screen.is_lit(4, 11));
+    }
+
+    /// A screen with the given raster pixels lit; `x` must be at least 4.
+    fn screen_with(lit: &[(usize, usize)]) -> Screen {
+        let mut video_ram = vec![0; VIDEO_RAM_SIZE];
+        for &(x, y) in lit {
+            let bit = x - FIRST_VIDEO_PIXEL;
+            video_ram[y * BYTES_PER_LINE + bit / 8] |= 1 << (bit % 8);
+        }
+        let mut screen = Screen::new();
+        screen.render(&video_ram);
+        screen
+    }
+
+    fn picture(screen: &Screen, game: Game) -> Vec<Rgb> {
+        let (width, height) = game.info().orientation.picture_size();
+        let mut out = vec![Rgb::new(1, 2, 3); width * height];
+        screen.draw_picture(game, &mut out, |color| color);
+        out
+    }
+
+    #[test]
+    fn horizontal_pictures_keep_the_raster_layout() {
+        let screen = screen_with(&[(5, 3)]);
+        let out = picture(&screen, Game::Zzzap);
+        assert_eq!(out[3 * SCREEN_WIDTH + 5], Rgb::WHITE);
+        assert_eq!(
+            out.iter().filter(|&&color| color == Rgb::BLACK).count(),
+            out.len() - 1
+        );
+    }
+
+    #[test]
+    fn vertical_pictures_are_turned_clockwise() {
+        let screen = screen_with(&[(4, 0), (259, 223), (100, 10)]);
+        let out = picture(&screen, Game::LagunaRacer);
+        let at = |x: usize, y: usize| out[y * SCREEN_HEIGHT + x];
+        assert_eq!(at(223, 4), Rgb::WHITE, "top left goes to top right");
+        assert_eq!(at(0, 259), Rgb::WHITE, "bottom right goes to bottom left");
+        assert_eq!(at(213, 100), Rgb::WHITE);
+        assert_eq!(out.iter().filter(|&&color| color == Rgb::WHITE).count(), 3);
+    }
+
+    #[test]
+    fn overlay_tints_lit_pixels_only() {
+        let screen = screen_with(&[(10, 100), (10, 200)]);
+        let out = picture(&screen, Game::Zzzap);
+        assert_eq!(out[100 * SCREEN_WIDTH + 10], Rgb::WHITE);
+        assert_eq!(out[200 * SCREEN_WIDTH + 10], Rgb::new(0x33, 0x66, 0xff));
+        assert_eq!(out[200 * SCREEN_WIDTH + 11], Rgb::BLACK);
+    }
+
+    #[test]
+    #[should_panic(expected = "one picture")]
+    fn drawing_into_a_wrongly_sized_buffer_panics() {
+        Screen::new().draw_picture(Game::LagunaRacer, &mut [0u32; 10], |_| 0);
     }
 }
