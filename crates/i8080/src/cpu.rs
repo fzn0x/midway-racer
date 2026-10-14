@@ -8,11 +8,23 @@ const HALTED_STEP_CYCLES: u32 = 4;
 ///
 /// The CPU owns its registers and a free-running cycle counter; memory and
 /// I/O live behind the [`Bus`] passed to [`Cpu::step`].
+///
+/// # Interrupts
+///
+/// A device requests an interrupt with [`Cpu::raise_interrupt`], handing
+/// over the instruction it would place on the data bus during the
+/// acknowledge cycle, normally an `RST n`. The request stays pending, like
+/// a level-triggered `INT` line, until the CPU accepts it at an instruction
+/// boundary while interrupts are enabled, or until the device withdraws it
+/// with [`Cpu::clear_interrupt`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Cpu {
     /// The programmer-visible registers.
     pub registers: Registers,
     interrupts_enabled: bool,
+    /// Set by `EI`, which only lets interrupts in after the next instruction.
+    interrupt_delay: bool,
+    interrupt_request: Option<u8>,
     halted: bool,
     cycles: u64,
 }
@@ -28,10 +40,12 @@ impl Cpu {
     ///
     /// Like the real chip, this clears the program counter, disables
     /// interrupts and leaves the halt state, but keeps the other registers
-    /// unchanged.
+    /// unchanged. A pending interrupt request belongs to the requesting
+    /// device and is left alone.
     pub const fn reset(&mut self) {
         self.registers.pc = 0;
         self.interrupts_enabled = false;
+        self.interrupt_delay = false;
         self.halted = false;
     }
 
@@ -51,10 +65,32 @@ impl Cpu {
         self.interrupts_enabled
     }
 
-    /// Executes a single instruction and returns how many clock cycles it
-    /// took.
+    /// Requests an interrupt. When accepted, the CPU executes `instruction`
+    /// in place of the next opcode fetch, without advancing the program
+    /// counter. It should be a single-byte instruction, normally `RST n`
+    /// (`0xC7 | n << 3`).
+    ///
+    /// A new request replaces one that is still pending.
+    pub const fn raise_interrupt(&mut self, instruction: u8) {
+        self.interrupt_request = Some(instruction);
+    }
+
+    /// Withdraws a pending interrupt request.
+    pub const fn clear_interrupt(&mut self) {
+        self.interrupt_request = None;
+    }
+
+    /// Returns whether an interrupt request is waiting to be accepted.
+    pub const fn interrupt_pending(&self) -> bool {
+        self.interrupt_request.is_some()
+    }
+
+    /// Executes a single instruction, or accepts a pending interrupt, and
+    /// returns how many clock cycles it took.
     pub fn step<B: Bus + ?Sized>(&mut self, bus: &mut B) -> u32 {
-        let cycles = if self.halted {
+        let cycles = if let Some(instruction) = self.acknowledge_interrupt() {
+            self.execute(bus, instruction)
+        } else if self.halted {
             HALTED_STEP_CYCLES
         } else {
             let opcode = self.fetch_byte(bus);
@@ -62,6 +98,18 @@ impl Cpu {
         };
         self.cycles += u64::from(cycles);
         cycles
+    }
+
+    /// Accepts the pending interrupt request if interrupts are enabled,
+    /// returning the instruction supplied by the device.
+    fn acknowledge_interrupt(&mut self) -> Option<u8> {
+        if core::mem::take(&mut self.interrupt_delay) || !self.interrupts_enabled {
+            return None;
+        }
+        let instruction = self.interrupt_request.take()?;
+        self.interrupts_enabled = false;
+        self.halted = false;
+        Some(instruction)
     }
 
     /// Executes instructions until the cycle counter reaches `cycle`.
@@ -282,7 +330,10 @@ impl Cpu {
             // DI
             0xf3 => self.interrupts_enabled = false,
             // EI
-            0xfb => self.interrupts_enabled = true,
+            0xfb => {
+                self.interrupts_enabled = true;
+                self.interrupt_delay = true;
+            }
         }
         cycles
     }
@@ -1111,6 +1162,106 @@ mod tests {
         run(&mut cpu, &[0xfb, 0xf3, 0x76]); // EI ; DI ; HLT
         assert!(!cpu.interrupts_enabled());
         assert_eq!(cpu.cycles(), 4 + 4);
+    }
+
+    /// `RST 7`, the instruction devices jam onto the bus in these tests.
+    const RST_7: u8 = 0xff;
+
+    /// Places `routine` at the `RST 7` vector of `program`.
+    fn with_rst7_handler(program: &[u8], routine: &[u8]) -> TestBus {
+        let mut bus = TestBus::with_program(program);
+        bus.memory[0x38..0x38 + routine.len()].copy_from_slice(routine);
+        bus
+    }
+
+    #[test]
+    fn interrupt_is_accepted_one_instruction_after_ei() {
+        let program = [
+            0x31, 0x00, 0x01, // 0000: LXI SP,0100H
+            0x00, // 0003: NOP
+            0xfb, // 0004: EI
+            0x00, // 0005: NOP
+            0x00, // 0006: NOP
+            0x76, // 0007: HLT
+        ];
+        let mut bus = with_rst7_handler(&program, &[0x06, 0xaa, 0xc9]); // MVI B,0AAH ; RET
+        let mut cpu = Cpu::new();
+        cpu.raise_interrupt(RST_7);
+
+        cpu.step(&mut bus); // LXI
+        cpu.step(&mut bus); // NOP: interrupts are disabled
+        cpu.step(&mut bus); // EI
+        cpu.step(&mut bus); // NOP: EI only takes effect after this one
+        assert_eq!(cpu.registers.pc, 0x0006);
+        assert!(cpu.interrupt_pending());
+
+        assert_eq!(cpu.step(&mut bus), 11, "RST takes 11 states");
+        assert_eq!(cpu.registers.pc, 0x0038);
+        assert_eq!(bus.memory[0x00fe..0x0100], [0x06, 0x00], "return address");
+        assert!(!cpu.interrupt_pending());
+        assert!(!cpu.interrupts_enabled(), "accepting disables interrupts");
+
+        while !cpu.is_halted() {
+            cpu.step(&mut bus);
+        }
+        assert_eq!(cpu.registers.b, 0xaa);
+        assert_eq!(cpu.registers.pc, 0x0008);
+    }
+
+    #[test]
+    fn interrupt_wakes_a_halted_cpu() {
+        let program = [
+            0x31, 0x00, 0x01, // 0000: LXI SP,0100H
+            0xfb, // 0003: EI
+            0x76, // 0004: HLT
+            0x3e, 0x01, // 0005: MVI A,01H
+            0x76, // 0007: HLT
+        ];
+        // MVI B,02H ; EI ; RET
+        let mut bus = with_rst7_handler(&program, &[0x06, 0x02, 0xfb, 0xc9]);
+        let mut cpu = Cpu::new();
+        while !cpu.is_halted() {
+            cpu.step(&mut bus);
+        }
+        assert_eq!(cpu.step(&mut bus), HALTED_STEP_CYCLES);
+
+        cpu.raise_interrupt(RST_7);
+        cpu.step(&mut bus);
+        assert!(!cpu.is_halted());
+        assert_eq!(cpu.registers.pc, 0x0038);
+
+        while !cpu.is_halted() {
+            cpu.step(&mut bus);
+        }
+        assert_eq!((cpu.registers.a, cpu.registers.b), (0x01, 0x02));
+        assert!(cpu.interrupts_enabled());
+    }
+
+    #[test]
+    fn disabled_interrupts_leave_the_request_pending() {
+        let mut bus = TestBus::with_program(&[0xf3, 0x00, 0x00, 0x76]); // DI ; NOP ; NOP ; HLT
+        let mut cpu = Cpu::new();
+        cpu.raise_interrupt(RST_7);
+        while !cpu.is_halted() {
+            cpu.step(&mut bus);
+        }
+        cpu.step(&mut bus);
+        assert!(cpu.is_halted());
+        assert!(cpu.interrupt_pending());
+    }
+
+    #[test]
+    fn withdrawn_interrupt_is_never_taken() {
+        let mut bus = TestBus::with_program(&[0xfb, 0x00, 0x00, 0x76]); // EI ; NOP ; NOP ; HLT
+        let mut cpu = Cpu::new();
+        cpu.raise_interrupt(RST_7);
+        cpu.step(&mut bus);
+        cpu.clear_interrupt();
+        while !cpu.is_halted() {
+            cpu.step(&mut bus);
+        }
+        assert_eq!(cpu.registers.pc, 0x0004);
+        assert!(cpu.interrupts_enabled());
     }
 
     #[test]
