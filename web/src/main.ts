@@ -1,11 +1,13 @@
 import "./styles.css";
 
+import { AudioOutput } from "./audio";
 import { byId } from "./dom";
 import { type Command, Keyboard } from "./keyboard";
 import { Loader } from "./loader";
 import { Panel } from "./panel";
 import { clearFiles, loadFiles, saveFiles, type StoredFile } from "./rom-store";
 import { Session } from "./session";
+import { loadSettings, saveSettings } from "./settings";
 import init, {
   Emulator,
   type GameDescription,
@@ -15,9 +17,13 @@ import init, {
 
 /** Files larger than this cannot be ROM sets of these games and are ignored. */
 const MAX_FILE_SIZE = 4 * 1024 * 1024;
+/** Volume change per key press. */
+const VOLUME_STEP = 0.1;
 
 class App {
   readonly #memory: WebAssembly.Memory;
+  readonly #audio: AudioOutput | undefined;
+  readonly #settings = loadSettings();
   readonly #games: readonly GameDescription[] = supportedGames();
   readonly #loader: Loader;
   readonly #panel: Panel;
@@ -29,8 +35,9 @@ class App {
   #library = new RomLibrary();
   #session: Session | undefined;
 
-  constructor(memory: WebAssembly.Memory) {
+  constructor(memory: WebAssembly.Memory, audio: AudioOutput | undefined) {
     this.#memory = memory;
+    this.#audio = audio;
     this.#loader = new Loader(this.#games, {
       addFiles: (files) => void this.#addFiles(files),
       play: (shortName) => {
@@ -48,10 +55,27 @@ class App {
       changeGame: () => {
         this.#changeGame();
       },
+      toggleMute: () => {
+        this.#setSound({ muted: !this.#settings.muted });
+      },
+      setVolume: (volume) => {
+        this.#setSound({ volume, muted: false });
+      },
     });
     this.#keyboard = new Keyboard(window, (command) => {
       this.#command(command);
     });
+
+    // Browsers only start sound after the player interacts with the page.
+    for (const type of ["pointerdown", "keydown"] as const) {
+      window.addEventListener(type, () => void audio?.resume(), {
+        passive: true,
+      });
+    }
+    audio?.onRunningChange(() => {
+      this.#setSound({});
+    });
+    this.#setSound({});
   }
 
   /**
@@ -99,18 +123,62 @@ class App {
       case "shift":
         session.shift();
         break;
+      case "mute":
+        this.#setSound({ muted: !this.#settings.muted });
+        break;
+      case "volume-down":
+        this.#setSound({
+          volume: this.#settings.volume - VOLUME_STEP,
+          muted: false,
+        });
+        break;
+      case "volume-up":
+        this.#setSound({
+          volume: this.#settings.volume + VOLUME_STEP,
+          muted: false,
+        });
+        break;
     }
+  }
+
+  /** Changes the sound settings, applies and remembers them. */
+  #setSound(change: { volume?: number; muted?: boolean }): void {
+    const settings = this.#settings;
+    if (change.volume !== undefined) {
+      settings.volume = Math.min(
+        1,
+        Math.max(0, Math.round(change.volume * 20) / 20),
+      );
+    }
+    if (change.muted !== undefined) {
+      settings.muted = change.muted;
+    }
+    saveSettings(settings);
+    if (this.#audio) {
+      this.#audio.volume = settings.muted ? 0 : settings.volume;
+    }
+    this.#panel.showSound({
+      volume: settings.volume,
+      muted: settings.muted,
+      available: this.#audio !== undefined,
+      running: this.#audio?.running ?? false,
+    });
   }
 
   #play(shortName: string): void {
     this.#session?.stop();
-    const emulator = new Emulator(this.#library, shortName, 0);
+    const emulator = new Emulator(
+      this.#library,
+      shortName,
+      this.#audio?.sampleRate ?? 0,
+    );
     this.#session = new Session(
       emulator,
       this.#memory,
       this.#screen,
       this.#keyboard,
       this.#panel,
+      this.#audio,
     );
     this.#gameSection.dataset.orientation = emulator.vertical
       ? "vertical"
@@ -220,7 +288,11 @@ function errorMessage(error: unknown): string {
 
 async function main(): Promise<void> {
   const { memory } = await init();
-  await new App(memory).start();
+  const audio = await AudioOutput.create().catch((error: unknown) => {
+    console.warn("sound is unavailable", error);
+    return undefined;
+  });
+  await new App(memory, audio).start();
 }
 
 main().catch((error: unknown) => {

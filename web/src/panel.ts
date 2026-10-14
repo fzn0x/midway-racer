@@ -2,16 +2,19 @@
 
 import { byId } from "./dom";
 
-/** What the panel's buttons do. */
+/** What the panel's controls do. */
 export interface PanelActions {
   insertCoin(): void;
   togglePause(): void;
   reset(): void;
   shift(): void;
   changeGame(): void;
+  toggleMute(): void;
+  /** The volume slider moved, to a volume from 0 to 1. */
+  setVolume(volume: number): void;
 }
 
-/** What the panel shows. */
+/** What the panel shows about the game. */
 export interface PanelState {
   steering: number;
   accelerator: number;
@@ -19,11 +22,25 @@ export interface PanelState {
   paused: boolean;
 }
 
+/** What the panel shows about the sound. */
+export interface SoundState {
+  /** Volume from 0 to 1. */
+  volume: number;
+  muted: boolean;
+  /** Whether the browser can play sound at all. */
+  available: boolean;
+  /** Whether sound is playing, which needs a user gesture first. */
+  running: boolean;
+}
+
 export class Panel {
   readonly #shifter = byId("shifter", HTMLButtonElement);
   readonly #wheel = byId("wheel-gauge");
   readonly #pedal = byId("pedal-gauge");
   readonly #pause = byId("pause", HTMLButtonElement);
+  readonly #mute = byId("mute", HTMLButtonElement);
+  readonly #volume = byId("volume", HTMLInputElement);
+  readonly #soundHint = byId("sound-hint");
   #shown: PanelState | undefined;
 
   constructor(actions: PanelActions) {
@@ -45,6 +62,12 @@ export class Panel {
     bind("change-game", () => {
       actions.changeGame();
     });
+    bind("mute", () => {
+      actions.toggleMute();
+    });
+    this.#volume.addEventListener("input", () => {
+      actions.setVolume(this.#volume.valueAsNumber / 100);
+    });
   }
 
   /** Updates the panel, touching the page only where something changed. */
@@ -64,6 +87,25 @@ export class Panel {
       setGauge(this.#pedal, state.accelerator);
     }
     this.#shown = { ...state };
+  }
+
+  /** Shows the volume and whether sound is on. */
+  showSound(state: SoundState): void {
+    this.#volume.value = String(Math.round(state.volume * 100));
+    this.#volume.disabled = !state.available;
+    this.#mute.disabled = !state.available;
+    this.#mute.setAttribute("aria-pressed", String(state.muted));
+    this.#mute.textContent = state.muted ? "Unmute" : "Mute";
+
+    if (!state.available) {
+      this.#soundHint.textContent = "Sound is not available in this browser.";
+    } else if (!state.running) {
+      this.#soundHint.textContent =
+        "Click or press a key to turn the sound on.";
+    } else {
+      this.#soundHint.textContent = "";
+    }
+    this.#soundHint.hidden = this.#soundHint.textContent === "";
   }
 }
 

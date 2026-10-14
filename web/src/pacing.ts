@@ -6,6 +6,21 @@
  */
 export const MAX_CATCH_UP_FRAMES = 4;
 
+/**
+ * Returns how many frames to emulate to keep `leadSeconds` of sound queued
+ * ahead of playback, given `queued` samples waiting at `sampleRate`.
+ */
+export function audioFramesDue(
+  queued: number,
+  sampleRate: number,
+  frameRate: number,
+  leadSeconds: number,
+): number {
+  const missing = Math.max(0, leadSeconds * sampleRate - queued);
+  const frames = Math.ceil((missing * frameRate) / sampleRate);
+  return Math.min(frames, MAX_CATCH_UP_FRAMES);
+}
+
 /** Paces emulation by elapsed time, at the board's refresh rate. */
 export class FrameClock {
   readonly #frameRate: number;

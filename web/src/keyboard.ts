@@ -1,7 +1,8 @@
 /** Keyboard controls, by physical key position so any layout works. */
 
 /** Something a key press asks for, besides driving. */
-export type Command = "coin" | "pause" | "reset" | "shift";
+export type Command =
+  "coin" | "pause" | "reset" | "shift" | "mute" | "volume-down" | "volume-up";
 
 export const STEER_LEFT = ["ArrowLeft", "KeyA"] as const;
 export const STEER_RIGHT = ["ArrowRight", "KeyD"] as const;
@@ -17,6 +18,11 @@ const COMMANDS: Readonly<Partial<Record<string, Command>>> = {
   Space: "shift",
   ShiftLeft: "shift",
   ShiftRight: "shift",
+  KeyM: "mute",
+  Minus: "volume-down",
+  NumpadSubtract: "volume-down",
+  Equal: "volume-up",
+  NumpadAdd: "volume-up",
 };
 
 /** Keys the game owns, whose default actions such as scrolling are blocked. */

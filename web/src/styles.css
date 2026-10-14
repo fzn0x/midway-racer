@@ -480,6 +480,58 @@ code {
   content: "";
 }
 
+/* Sound: volume, mute and the hint to click for sound. */
+
+.sound {
+  display: grid;
+  gap: 8px;
+}
+
+.sound__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sound__volume {
+  flex: 1;
+}
+
+.sound__volume input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.sound__hint {
+  margin: 0;
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+
+.sound__hint[hidden] {
+  display: none;
+}
+
+.button--small {
+  min-height: 32px;
+  padding: 4px 12px;
+  font-size: 0.85rem;
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   .game {
     flex-direction: column;

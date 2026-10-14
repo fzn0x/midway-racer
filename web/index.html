@@ -112,6 +112,32 @@
               Change game
             </button>
           </div>
+
+          <div class="sound">
+            <div class="sound__controls">
+              <label class="sound__volume">
+                <span class="visually-hidden">Volume</span>
+                <input
+                  type="range"
+                  id="volume"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value="80"
+                />
+              </label>
+              <button
+                type="button"
+                class="button button--small"
+                id="mute"
+                aria-pressed="false"
+                title="Mute (M)"
+              >
+                Mute
+              </button>
+            </div>
+            <p class="sound__hint" id="sound-hint" role="status" hidden></p>
+          </div>
         </aside>
       </section>
 

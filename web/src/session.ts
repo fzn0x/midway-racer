@@ -1,5 +1,6 @@
 /** A game being played: the emulation loop and its inputs and outputs. */
 
+import { AUDIO_LEAD_SECONDS, type AudioOutput } from "./audio";
 import {
   ACCELERATE,
   type Keyboard,
@@ -7,7 +8,7 @@ import {
   STEER_LEFT,
   STEER_RIGHT,
 } from "./keyboard";
-import { FrameClock } from "./pacing";
+import { audioFramesDue, FrameClock } from "./pacing";
 import type { Panel } from "./panel";
 import { Renderer } from "./renderer";
 import {
@@ -22,8 +23,13 @@ export class Session {
   readonly #renderer: Renderer;
   readonly #keyboard: Keyboard;
   readonly #panel: Panel;
+  readonly #audio: AudioOutput | undefined;
   readonly #input = new InputState();
-  readonly #clock = new FrameClock(frameRate(), performance.now());
+  /** The board's refresh rate; read once the WebAssembly module is ready. */
+  readonly #frameRate = frameRate();
+  readonly #clock = new FrameClock(this.#frameRate, performance.now());
+  /** Whether the sound card paces emulation, rather than the clock. */
+  #audible = false;
   #highGear = false;
   #paused = false;
   #animationFrame = 0;
@@ -34,6 +40,7 @@ export class Session {
     canvas: HTMLCanvasElement,
     keyboard: Keyboard,
     panel: Panel,
+    audio: AudioOutput | undefined,
   ) {
     this.emulator = emulator;
     this.#memory = memory;
@@ -44,6 +51,7 @@ export class Session {
     );
     this.#keyboard = keyboard;
     this.#panel = panel;
+    this.#audio = audio;
   }
 
   /** Starts emulating. */
@@ -56,6 +64,7 @@ export class Session {
   /** Stops emulating and frees the emulator. */
   stop(): void {
     cancelAnimationFrame(this.#animationFrame);
+    this.#audio?.flush();
     this.#input.free();
     this.emulator.free();
   }
@@ -89,10 +98,28 @@ export class Session {
     if (this.#paused) {
       return;
     }
-    const frames = this.#clock.framesDue(now);
+
+    // While sound plays, keep its queue topped up so the game runs at the
+    // sound card's pace; otherwise follow the clock.
+    const audio = this.#audio?.running ? this.#audio : undefined;
+    if ((audio !== undefined) !== this.#audible) {
+      this.#audible = audio !== undefined;
+      this.#clock.restart(now);
+      this.#audio?.flush();
+    }
+    const frames = audio
+      ? audioFramesDue(
+          audio.queued,
+          audio.sampleRate,
+          this.#frameRate,
+          AUDIO_LEAD_SECONDS,
+        )
+      : this.#clock.framesDue(now);
+
     for (let frame = 0; frame < frames; frame++) {
       this.#readInput();
       this.emulator.runFrame(this.#input);
+      audio?.play(this.emulator.audio());
     }
     if (frames > 0) {
       this.#renderer.draw(this.#memory, this.emulator.drawPicture());
