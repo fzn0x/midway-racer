@@ -2,7 +2,8 @@
 //!
 //! It walks the central directory, supports stored and deflated entries,
 //! verifies every entry's CRC-32 and skips entries too large to be ROM
-//! dumps.
+//! dumps. Archives are untrusted input: the number of entries and the total
+//! extracted size are bounded, so a "zip bomb" cannot exhaust memory.
 
 use std::fmt;
 
@@ -22,6 +23,11 @@ const ENCRYPTED_FLAG: u16 = 0x0001;
 /// Entries larger than this cannot be ROM dumps of these boards and are
 /// skipped rather than inflated.
 const MAX_ENTRY_SIZE: usize = 0x1_0000;
+/// The most entries an archive may list. MAME's sets have a handful.
+const MAX_ENTRIES: usize = 4_096;
+/// The most data extracting an archive may produce, in bytes. A ROM set of
+/// these boards is a few kilobytes.
+const MAX_TOTAL_SIZE: usize = 4 * 1024 * 1024;
 
 /// Returns whether `data` starts like a zip archive.
 pub(crate) fn is_zip(data: &[u8]) -> bool {
@@ -32,9 +38,13 @@ pub(crate) fn is_zip(data: &[u8]) -> bool {
 pub(crate) fn extract(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ZipError> {
     let directory = find_end_of_central_directory(archive)?;
     let entries = usize::from(read_u16(archive, directory + 10)?);
+    if entries > MAX_ENTRIES {
+        return Err(ZipError::TooLarge);
+    }
     let mut offset = read_u32(archive, directory + 16)? as usize;
 
     let mut files = Vec::with_capacity(entries);
+    let mut total_size = 0;
     for _ in 0..entries {
         if read_u32(archive, offset)? != CENTRAL_DIRECTORY_HEADER {
             return Err(ZipError::Corrupt);
@@ -61,6 +71,10 @@ pub(crate) fn extract(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ZipError
         }
         if flags & ENCRYPTED_FLAG != 0 {
             return Err(ZipError::Unsupported("encrypted entries"));
+        }
+        total_size += size as usize;
+        if total_size > MAX_TOTAL_SIZE {
+            return Err(ZipError::TooLarge);
         }
 
         let compressed = entry_data(archive, local_header as usize, compressed_size as usize)?;
@@ -138,6 +152,8 @@ pub enum ZipError {
     Corrupt,
     /// The archive uses a feature this reader does not support.
     Unsupported(&'static str),
+    /// The archive holds far more data than a ROM set.
+    TooLarge,
     /// An entry's contents do not match its recorded checksum.
     ChecksumMismatch {
         /// The name of the entry.
@@ -151,6 +167,7 @@ impl fmt::Display for ZipError {
             Self::NotAnArchive => f.write_str("not a zip archive"),
             Self::Corrupt => f.write_str("the zip archive is damaged"),
             Self::Unsupported(feature) => write!(f, "{feature} are not supported"),
+            Self::TooLarge => f.write_str("the zip archive holds too much data to be a ROM set"),
             Self::ChecksumMismatch { name } => {
                 write!(f, "{name} is damaged inside the zip archive")
             }
@@ -196,6 +213,68 @@ mod tests {
     fn detects_truncation() {
         let truncated = &SAMPLE[..SAMPLE.len() / 2];
         assert!(extract(truncated).is_err());
+    }
+
+    /// A "zip bomb": `entries` central directory entries all pointing at the
+    /// same deflated 64 KiB of zeroes.
+    fn bomb(entries: u16) -> Vec<u8> {
+        let contents = vec![0; MAX_ENTRY_SIZE];
+        let compressed = miniz_oxide::deflate::compress_to_vec(&contents, 9);
+        let crc = crc32(&contents).to_le_bytes();
+        let compressed_size = (compressed.len() as u32).to_le_bytes();
+        let size = (contents.len() as u32).to_le_bytes();
+
+        let mut archive = Vec::new();
+        archive.extend(LOCAL_FILE_HEADER.to_le_bytes());
+        archive.extend([20, 0, 0, 0, 8, 0, 0, 0, 0, 0]);
+        archive.extend(crc);
+        archive.extend(compressed_size);
+        archive.extend(size);
+        archive.extend([1, 0, 0, 0, b'x']);
+        archive.extend(&compressed);
+
+        let directory_offset = (archive.len() as u32).to_le_bytes();
+        let directory_start = archive.len();
+        for _ in 0..entries {
+            archive.extend(CENTRAL_DIRECTORY_HEADER.to_le_bytes());
+            archive.extend([20, 0, 20, 0, 0, 0, 8, 0, 0, 0, 0, 0]);
+            archive.extend(crc);
+            archive.extend(compressed_size);
+            archive.extend(size);
+            archive.extend([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            archive.extend([0, 0, 0, 0, b'x']);
+        }
+        let directory_size = ((archive.len() - directory_start) as u32).to_le_bytes();
+        archive.extend(END_OF_CENTRAL_DIRECTORY.to_le_bytes());
+        archive.extend([0, 0, 0, 0]);
+        archive.extend(entries.to_le_bytes());
+        archive.extend(entries.to_le_bytes());
+        archive.extend(directory_size);
+        archive.extend(directory_offset);
+        archive.extend([0, 0]);
+        archive
+    }
+
+    #[test]
+    fn small_archives_built_like_bombs_still_extract() {
+        let files = extract(&bomb(2)).unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().all(|(_, data)| data.len() == MAX_ENTRY_SIZE));
+    }
+
+    #[test]
+    fn refuses_to_inflate_beyond_the_total_limit() {
+        let archive = bomb(100);
+        assert!(archive.len() < 16 * 1024, "the bomb itself is small");
+        assert_eq!(extract(&archive), Err(ZipError::TooLarge));
+    }
+
+    #[test]
+    fn refuses_archives_with_too_many_entries() {
+        let mut archive = bomb(1);
+        let count = archive.len() - 12;
+        archive[count..count + 2].copy_from_slice(&u16::MAX.to_le_bytes());
+        assert_eq!(extract(&archive), Err(ZipError::TooLarge));
     }
 
     #[test]
