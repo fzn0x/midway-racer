@@ -37,6 +37,8 @@ class App {
   readonly #subtitle = byId("game-title");
   #session: Session | undefined;
   #game: GameInfo | undefined;
+  /** Whether the player last used a pointer rather than the keyboard. */
+  #pointerUsed = false;
 
   constructor(memory: WebAssembly.Memory, audio: AudioOutput | undefined) {
     this.#memory = memory;
@@ -106,6 +108,41 @@ class App {
     });
     this.#setSound({});
     this.#applyDisplay();
+
+    // A control clicked or tapped hands the keyboard back to the game, so
+    // the keys keep driving; keyboard users keep their place.
+    window.addEventListener(
+      "pointerdown",
+      () => {
+        this.#pointerUsed = true;
+      },
+      { passive: true, capture: true },
+    );
+    window.addEventListener(
+      "keydown",
+      () => {
+        this.#pointerUsed = false;
+      },
+      { passive: true, capture: true },
+    );
+    document.addEventListener("click", (event) => {
+      if (event.detail > 0) {
+        this.#returnFocusToGame();
+      }
+    });
+  }
+
+  /** Moves focus off a control of the game or the top bar, so that the
+   * keys drive the game again. */
+  #returnFocusToGame(): void {
+    const focused = document.activeElement;
+    if (
+      this.#session &&
+      focused instanceof HTMLElement &&
+      focused.closest("#game, .topbar")
+    ) {
+      focused.blur();
+    }
   }
 
   /**
@@ -186,10 +223,16 @@ class App {
       session.paused = true;
     }
     this.#keyboard.enabled = false;
+    const openedByPointer = this.#pointerUsed;
     openDialog(dialog, () => {
       this.#keyboard.enabled = true;
       if (session && session === this.#session) {
         session.paused = wasPaused;
+      }
+      // Closing returns focus to the button that opened the dialog, which
+      // would catch Space; keyboard users keep it.
+      if (openedByPointer) {
+        this.#returnFocusToGame();
       }
     });
   }
