@@ -103,8 +103,9 @@ h3 {
 }
 
 .loader h2 {
-  margin-bottom: 8px;
-  font-size: 1.4rem;
+  margin-bottom: 10px;
+  font-size: 1.85rem;
+  letter-spacing: -0.01em;
 }
 
 .loader__lead {
@@ -167,7 +168,7 @@ code {
 }
 
 .rom-set h3 {
-  font-size: 1.05rem;
+  font-size: 1.2rem;
 }
 
 .rom-set__meta {
@@ -712,6 +713,10 @@ code {
 
 .dialog__body > p {
   margin: 0;
+}
+
+.dialog__header h2 {
+  font-size: 1.5rem;
 }
 
 .dialog__header {
