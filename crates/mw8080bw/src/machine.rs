@@ -7,6 +7,7 @@ use crate::game::Game;
 use crate::mb14241::Mb14241;
 use crate::memory::{Memory, RAM_SIZE};
 use crate::rom::ProgramRom;
+use crate::sound::SoundLatches;
 use crate::timing::{CYCLES_PER_FRAME, CYCLES_PER_LINE, LINES_PER_FRAME, VISIBLE_LINES};
 use crate::video::Screen;
 use crate::watchdog::Watchdog;
@@ -189,17 +190,6 @@ impl Machine {
             self.cpu.step(&mut self.board);
         }
     }
-}
-
-/// The values last written to the sound board's two latches.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct SoundLatches {
-    /// Port 2: accelerator level in bits 0–3, high gear in bit 4 and low
-    /// gear in bit 5.
-    pub engine: u8,
-    /// Port 5: boom in bit 0, engine off in bit 1, tyre skid in bit 2,
-    /// post-crash noise in bit 3 and the coin counter in bit 5.
-    pub effects: u8,
 }
 
 /// Everything the CPU reaches over its bus.
