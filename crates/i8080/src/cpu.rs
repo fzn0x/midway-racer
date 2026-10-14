@@ -12,6 +12,7 @@ const HALTED_STEP_CYCLES: u32 = 4;
 pub struct Cpu {
     /// The programmer-visible registers.
     pub registers: Registers,
+    interrupts_enabled: bool,
     halted: bool,
     cycles: u64,
 }
@@ -25,10 +26,12 @@ impl Cpu {
 
     /// Asserts the `RESET` input.
     ///
-    /// Like the real chip, this clears the program counter and leaves the
-    /// halt state, but keeps the other registers unchanged.
+    /// Like the real chip, this clears the program counter, disables
+    /// interrupts and leaves the halt state, but keeps the other registers
+    /// unchanged.
     pub const fn reset(&mut self) {
         self.registers.pc = 0;
+        self.interrupts_enabled = false;
         self.halted = false;
     }
 
@@ -40,6 +43,12 @@ impl Cpu {
     /// Returns whether the CPU is stopped by a `HLT` instruction.
     pub const fn is_halted(&self) -> bool {
         self.halted
+    }
+
+    /// Returns the state of the `INTE` output pin: whether `EI` has enabled
+    /// interrupts.
+    pub const fn interrupts_enabled(&self) -> bool {
+        self.interrupts_enabled
     }
 
     /// Executes a single instruction and returns how many clock cycles it
@@ -237,7 +246,43 @@ impl Cpu {
             // PCHL
             0xe9 => self.registers.pc = self.registers.hl(),
 
-            _ => todo!("opcode {opcode:#04x} is not implemented yet"),
+            // PUSH rp
+            0xc5 | 0xd5 | 0xe5 => self.push(bus, self.pair(opcode >> 4)),
+            // PUSH PSW
+            0xf5 => self.push(bus, self.registers.psw()),
+            // POP rp
+            0xc1 | 0xd1 | 0xe1 => {
+                let value = self.pop(bus);
+                self.set_pair(opcode >> 4, value);
+            }
+            // POP PSW
+            0xf1 => {
+                let value = self.pop(bus);
+                self.registers.set_psw(value);
+            }
+            // XTHL
+            0xe3 => {
+                let value = read_word(bus, self.registers.sp);
+                write_word(bus, self.registers.sp, self.registers.hl());
+                self.registers.set_hl(value);
+            }
+            // SPHL
+            0xf9 => self.registers.sp = self.registers.hl(),
+
+            // OUT d8
+            0xd3 => {
+                let port = self.fetch_byte(bus);
+                bus.output(port, self.registers.a);
+            }
+            // IN d8
+            0xdb => {
+                let port = self.fetch_byte(bus);
+                self.registers.a = bus.input(port);
+            }
+            // DI
+            0xf3 => self.interrupts_enabled = false,
+            // EI
+            0xfb => self.interrupts_enabled = true,
         }
         cycles
     }
@@ -444,16 +489,21 @@ fn write_word<B: Bus + ?Sized>(bus: &mut B, address: u16, value: u16) {
 mod tests {
     use super::*;
 
-    /// 64 KiB of flat RAM and no I/O devices.
+    /// 64 KiB of flat RAM. Reading port `n` returns `!n`, and port writes
+    /// are recorded.
     struct TestBus {
         memory: Vec<u8>,
+        outputs: Vec<(u8, u8)>,
     }
 
     impl TestBus {
         fn with_program(program: &[u8]) -> Self {
             let mut memory = vec![0; 0x1_0000];
             memory[..program.len()].copy_from_slice(program);
-            Self { memory }
+            Self {
+                memory,
+                outputs: Vec::new(),
+            }
         }
     }
 
@@ -466,11 +516,13 @@ mod tests {
             self.memory[usize::from(address)] = value;
         }
 
-        fn input(&mut self, _port: u8) -> u8 {
-            0
+        fn input(&mut self, port: u8) -> u8 {
+            !port
         }
 
-        fn output(&mut self, _port: u8, _value: u8) {}
+        fn output(&mut self, port: u8, value: u8) {
+            self.outputs.push((port, value));
+        }
     }
 
     /// Runs `program` from address zero until it halts. The cycles spent on
@@ -960,6 +1012,105 @@ mod tests {
         run(&mut cpu, &[0x21, 0x05, 0x00, 0xe9, 0x76, 0x76]);
         assert_eq!(cpu.registers.pc, 0x0006);
         assert_eq!(cpu.cycles(), 10 + 5);
+    }
+
+    #[test]
+    fn push_and_pop_round_trip_every_pair() {
+        let mut cpu = Cpu::new();
+        let program = [
+            0x31, 0x00, 0x01, // LXI SP,0100H
+            0x01, 0x34, 0x12, // LXI B,1234H
+            0x11, 0x78, 0x56, // LXI D,5678H
+            0x21, 0xbc, 0x9a, // LXI H,9ABCH
+            0xc5, 0xd5, 0xe5, // PUSH B ; PUSH D ; PUSH H
+            0xc1, 0xd1, 0xe1, // POP B ; POP D ; POP H
+            0x76, // HLT
+        ];
+        let bus = run(&mut cpu, &program);
+        assert_eq!(cpu.registers.bc(), 0x9abc);
+        assert_eq!(cpu.registers.de(), 0x5678);
+        assert_eq!(cpu.registers.hl(), 0x1234);
+        assert_eq!(cpu.registers.sp, 0x0100);
+        assert_eq!(
+            bus.memory[0x00fa..0x0100],
+            [0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12]
+        );
+        assert_eq!(cpu.cycles(), 4 * 10 + 3 * 11 + 3 * 10);
+    }
+
+    #[test]
+    fn push_psw_stores_the_fixed_flag_bits() {
+        let mut cpu = Cpu::new();
+        cpu.registers.flags = flags("SZAPC");
+        // LXI SP,0100H ; MVI A,42H ; PUSH PSW ; POP B ; HLT
+        let bus = run(&mut cpu, &[0x31, 0x00, 0x01, 0x3e, 0x42, 0xf5, 0xc1, 0x76]);
+        assert_eq!(bus.memory[0x00fe..0x0100], [0xd7, 0x42]);
+        assert_eq!(cpu.registers.bc(), 0x42d7);
+    }
+
+    #[test]
+    fn pop_psw_restores_accumulator_and_flags() {
+        let mut cpu = Cpu::new();
+        // LXI SP,0100H ; LXI B,8001H ; PUSH B ; POP PSW ; HLT
+        run(
+            &mut cpu,
+            &[0x31, 0x00, 0x01, 0x01, 0x01, 0x80, 0xc5, 0xf1, 0x76],
+        );
+        assert_eq!(cpu.registers.a, 0x80);
+        assert_eq!(cpu.registers.flags, flags("....C"));
+    }
+
+    #[test]
+    fn xthl_exchanges_hl_with_the_top_of_the_stack() {
+        let mut cpu = Cpu::new();
+        let program = [
+            0x31, 0x00, 0x01, // LXI SP,0100H
+            0x01, 0x0d, 0xf0, // LXI B,0F00DH
+            0xc5, // PUSH B
+            0x21, 0x3c, 0x0b, // LXI H,0B3CH
+            0xe3, // XTHL
+            0x76, // HLT
+        ];
+        let bus = run(&mut cpu, &program);
+        assert_eq!(cpu.registers.hl(), 0xf00d);
+        assert_eq!(bus.memory[0x00fe..0x0100], [0x3c, 0x0b]);
+        assert_eq!(cpu.registers.sp, 0x00fe);
+        assert_eq!(cpu.cycles(), 10 + 10 + 11 + 10 + 18);
+    }
+
+    #[test]
+    fn sphl_copies_hl_into_sp() {
+        let mut cpu = Cpu::new();
+        // LXI H,1234H ; SPHL ; HLT
+        run(&mut cpu, &[0x21, 0x34, 0x12, 0xf9, 0x76]);
+        assert_eq!(cpu.registers.sp, 0x1234);
+        assert_eq!(cpu.cycles(), 10 + 5);
+    }
+
+    #[test]
+    fn in_and_out_reach_the_io_space() {
+        let mut cpu = Cpu::new();
+        // IN 0FH ; OUT 42H ; HLT
+        let bus = run(&mut cpu, &[0xdb, 0x0f, 0xd3, 0x42, 0x76]);
+        assert_eq!(cpu.registers.a, 0xf0);
+        assert_eq!(bus.outputs, [(0x42, 0xf0)]);
+        assert_eq!(cpu.cycles(), 10 + 10);
+    }
+
+    #[test]
+    fn ei_and_di_drive_the_inte_pin() {
+        let mut cpu = Cpu::new();
+        assert!(!cpu.interrupts_enabled());
+
+        run(&mut cpu, &[0xfb, 0x76]); // EI ; HLT
+        assert!(cpu.interrupts_enabled());
+        cpu.reset();
+        assert!(!cpu.interrupts_enabled());
+
+        let mut cpu = Cpu::new();
+        run(&mut cpu, &[0xfb, 0xf3, 0x76]); // EI ; DI ; HLT
+        assert!(!cpu.interrupts_enabled());
+        assert_eq!(cpu.cycles(), 4 + 4);
     }
 
     #[test]
