@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/banner.png" width="800" alt="Midway Racer: Laguna Racer and 280-ZZZAP on a cycle-accurate Intel 8080">
+</p>
+
 # Midway Racer
 
 [![CI](https://github.com/fzn0x/midway-racer/actions/workflows/ci.yml/badge.svg)](https://github.com/fzn0x/midway-racer/actions/workflows/ci.yml)
@@ -10,12 +14,22 @@ board, running the 1970s racers **Laguna Racer** (1977) and **280-ZZZAP**
 
 **Play it in your browser: <https://fzn0x.github.io/midway-racer/>**
 
+![Laguna Racer in Midway Racer: the attract mode, a race in traffic, and a crash](docs/images/laguna-racer-gameplay.png)
+
+*Laguna Racer as the emulator draws it: the attract mode, racing through
+traffic, and steering into the roadside.*
+
 The game ROMs are copyrighted and not included. Load your own dump, such
 as MAME's `lagunar.zip`; it is checked against MAME's checksums and never
 leaves your machine.
 
+![The browser version racing in Laguna Racer, with the gear shifter, wheel and pedal gauges and controls beside the screen](docs/images/web-app.png)
+
 ## Features
 
+- **Verified with the original ROMs.** With MAME's `lagunar` set, Laguna
+  Racer boots into its attract mode, takes coins, races, steers, shifts
+  gear and crashes, without a single watchdog reset.
 - **An exact 8080.** Every documented and undocumented opcode with its
   real timing. The core passes the classic CP/M diagnostics, `TST8080`,
   `8080PRE`, `CPUTEST` and the full `8080EXM` exerciser, with exactly the
@@ -235,4 +249,5 @@ strict mode on Linux.
 Licensed under either of the [Apache License, Version 2.0](LICENSE-APACHE)
 or the [MIT license](LICENSE-MIT), at your option. Contributions are
 accepted under the same terms. Laguna Racer and 280-ZZZAP belong to their
-respective rights holders; no part of them is distributed here.
+respective rights holders. Their ROMs are not distributed here; the
+screenshots show the game running in the emulator, for illustration.
