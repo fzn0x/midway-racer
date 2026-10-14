@@ -12,6 +12,7 @@ publish.workspace = true
 
 [dependencies]
 i8080.workspace = true
+miniz_oxide = "0.9"
 
 [lints]
 workspace = true

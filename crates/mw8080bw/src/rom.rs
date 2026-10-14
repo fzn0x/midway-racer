@@ -5,6 +5,7 @@ use std::fmt;
 use crate::crc32::crc32;
 use crate::game::{Game, RomChip};
 use crate::memory::ROM_SIZE;
+use crate::zip::{self, ZipError};
 
 /// A named file that may hold a ROM chip dump.
 #[derive(Clone, PartialEq, Eq)]
@@ -47,6 +48,24 @@ impl RomFiles {
             name: name.into(),
             data,
         });
+    }
+
+    /// Adds a file to the collection, or the files inside it when it is a
+    /// zip archive such as MAME's `lagunar.zip`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a zip archive cannot be read.
+    pub fn add_file(&mut self, name: impl Into<String>, data: Vec<u8>) -> Result<(), ZipError> {
+        let name = name.into();
+        if zip::is_zip(&data) {
+            for (entry, contents) in zip::extract(&data)? {
+                self.add(format!("{name}/{entry}"), contents);
+            }
+        } else {
+            self.add(name, data);
+        }
+        Ok(())
     }
 
     /// Returns the files in the collection.
@@ -446,6 +465,32 @@ mod tests {
         let report = RomFiles::new().check(Game::Zzzap);
         assert_eq!(report.chips.len(), 6);
         assert!(!report.is_verified());
+    }
+
+    #[test]
+    fn archives_are_expanded_and_loose_files_kept() {
+        let mut files = RomFiles::new();
+        let archive = include_bytes!("../tests/fixtures/sample.zip").to_vec();
+        files.add_file("sample.zip", archive).unwrap();
+        files.add_file("loose.bin", vec![1, 2, 3]).unwrap();
+
+        let names: Vec<_> = files
+            .files()
+            .iter()
+            .map(|file| file.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "sample.zip/readme.txt",
+                "sample.zip/roms/pattern.bin",
+                "loose.bin"
+            ]
+        );
+        assert_eq!(
+            files.add_file("broken.zip", b"PK\x03\x04".to_vec()),
+            Err(ZipError::NotAnArchive)
+        );
     }
 
     #[test]
