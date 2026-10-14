@@ -1,5 +1,6 @@
 /** Playing the emulator's sound through an audio worklet. */
 
+import type { FlushMessage, PlayedReport } from "./audio-messages";
 import processorUrl from "./audio-processor.ts?worker&url";
 
 /** Sound kept queued ahead of playback, in seconds. */
@@ -10,6 +11,8 @@ export class AudioOutput {
   readonly #node: AudioWorkletNode;
   readonly #gain: GainNode;
   #queued = 0;
+  /** Counts flushes, to ignore progress reports sent before the latest. */
+  #generation = 0;
 
   /**
    * Opens the audio output. Browsers keep it suspended until the player
@@ -35,8 +38,10 @@ export class AudioOutput {
     this.#context = context;
     this.#node = node;
     this.#gain = gain;
-    node.port.onmessage = (event: MessageEvent<number>) => {
-      this.#queued = Math.max(0, this.#queued - event.data);
+    node.port.onmessage = (event: MessageEvent<PlayedReport>) => {
+      if (event.data.generation === this.#generation) {
+        this.#queued = Math.max(0, this.#queued - event.data.played);
+      }
     };
   }
 
@@ -81,6 +86,8 @@ export class AudioOutput {
   /** Drops the queued samples. */
   flush(): void {
     this.#queued = 0;
-    this.#node.port.postMessage("flush");
+    this.#generation++;
+    const message: FlushMessage = { flush: this.#generation };
+    this.#node.port.postMessage(message);
   }
 }

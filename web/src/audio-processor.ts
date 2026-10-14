@@ -3,8 +3,9 @@
  *
  * The page posts each frame's samples; the worklet plays them in order and
  * reports how many it played, so the page can keep the queue topped up.
- * Posting "flush" drops everything queued.
  */
+
+import type { PlayedReport, ToWorklet } from "./audio-messages";
 
 // The AudioWorkletGlobalScope, which TypeScript's DOM library lacks.
 declare abstract class AudioWorkletProcessor {
@@ -32,15 +33,20 @@ class SoundProcessor extends AudioWorkletProcessor {
   #last = 0;
   #played = 0;
   #quanta = 0;
+  #generation = 0;
 
   constructor() {
     super();
-    this.port.onmessage = (event: MessageEvent<Float32Array | "flush">) => {
-      if (event.data === "flush") {
+    this.port.onmessage = (event: MessageEvent<ToWorklet>) => {
+      const message = event.data;
+      if (message instanceof Float32Array) {
+        this.#queue.push(message);
+      } else {
         this.#queue.length = 0;
         this.#chunk = undefined;
-      } else {
-        this.#queue.push(event.data);
+        this.#played = 0;
+        this.#quanta = 0;
+        this.#generation = message.flush;
       }
     };
   }
@@ -60,7 +66,11 @@ class SoundProcessor extends AudioWorkletProcessor {
       }
     }
     if (++this.#quanta === REPORT_INTERVAL) {
-      this.port.postMessage(this.#played);
+      const report: PlayedReport = {
+        generation: this.#generation,
+        played: this.#played,
+      };
+      this.port.postMessage(report);
       this.#played = 0;
       this.#quanta = 0;
     }
