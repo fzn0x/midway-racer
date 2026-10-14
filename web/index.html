@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="Play Midway's 1977 arcade racer Laguna Racer, and 280-ZZZAP, on a cycle-accurate Intel 8080 emulator."
+    />
+    <meta name="theme-color" content="#0d0f12" />
+    <title>Midway Racer</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <script type="module" src="./src/main.ts"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <h1>Midway Racer</h1>
+        <p class="subtitle" id="game-title">Intel 8080 arcade emulator</p>
+      </div>
+    </header>
+
+    <main class="stage">
+      <section class="loader" id="loader" aria-labelledby="loader-heading">
+        <h2 id="loader-heading">Laguna Racer</h2>
+        <p id="loader-status" aria-live="polite">Starting the emulator…</p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        Emulation code is open source under the MIT or Apache-2.0 license. Game
+        ROMs are not included and never leave your browser.
+        <a href="https://github.com/fzn0x/midway-racer">Source on GitHub</a>
+      </p>
+    </footer>
+  </body>
+</html>

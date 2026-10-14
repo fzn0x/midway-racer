@@ -1,0 +1,30 @@
+{
+  "name": "midway-racer-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Play Laguna Racer and 280-ZZZAP in the browser",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "wasm": "cargo build --release --target wasm32-unknown-unknown --package midway-racer-web && wasm-bindgen --target web --out-dir src/wasm ../target/wasm32-unknown-unknown/release/midway_racer_web.wasm",
+    "dev": "npm run wasm && vite",
+    "build": "npm run wasm && tsc && vite build",
+    "preview": "vite preview",
+    "check": "tsc && eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4"
+  }
+}
