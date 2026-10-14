@@ -1,0 +1,20 @@
+# Rust build output
+/target/
+
+# Web frontend
+/web/node_modules/
+/web/dist/
+/web/src/wasm/
+
+# Arcade ROM images are copyrighted and must never be committed.
+/roms/
+
+# CP/M CPU test programs, downloaded by scripts/fetch-cpu-tests.sh
+/crates/i8080/tests/roms/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
